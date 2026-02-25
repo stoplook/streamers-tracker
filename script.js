@@ -1,5 +1,7 @@
+console.log("FRONT BUILD ✅", new Date().toISOString(), Math.random());
+
 console.log(
-  "SCRIPT VERSION: v8-noTT - STREAMERS + ADMIN CRUD + KICK (TikTok removed)",
+  "SCRIPT VERSION: v9-noTT-OR-NOCACHE - STREAMERS + ADMIN CRUD + KICK (TikTok removed)",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -29,6 +31,7 @@ async function adminApi(path, opts = {}) {
   const res = await fetch(WORKER_BASE + path, {
     ...opts,
     headers: authHeaders(opts.headers || {}),
+    cache: "no-store",
   });
   const text = await res.text();
   let data = null;
@@ -36,9 +39,7 @@ async function adminApi(path, opts = {}) {
     data = JSON.parse(text);
   } catch {}
   if (!res.ok) {
-    throw new Error(
-      data && data.error ? data.error : text || "HTTP " + res.status
-    );
+    throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
   }
   return data ?? text;
 }
@@ -120,6 +121,7 @@ const STATUS_CONCURRENCY = 4;
 const GREEN = "#00ff5f";
 const RED = "#ff4444";
 
+// Default avatar
 const DEFAULT_AVATAR =
   "data:image/svg+xml;base64," +
   btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">
@@ -192,7 +194,7 @@ function setLoading(on, text) {
 }
 
 // =====================
-// fetch with hard timeout
+// fetch with hard timeout (NO CACHE)
 // =====================
 async function fetchText(url, timeout = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -209,6 +211,7 @@ async function fetchText(url, timeout = FETCH_TIMEOUT_MS) {
     const fetchPromise = fetch(url, {
       signal: controller.signal,
       headers: { Accept: "*/*" },
+      cache: "no-store", // ✅ важно
     })
       .then((r) => (r && r.ok ? r.text() : null))
       .catch(() => null);
@@ -317,7 +320,7 @@ async function fetchSteamProfileWithRetry(steamUrl, maxAttempts = 4, delay = 110
 }
 
 // =====================
-// Twitch (через decapi)
+// Twitch (через decapi) + cacheBust
 // =====================
 function parseTwitchUsername(twitchUrl) {
   try {
@@ -337,10 +340,11 @@ async function getTwitchStatusStrict(username) {
   const cached = getTtl(statusCache, key, STATUS_TTL_MS);
   if (cached !== null) return cached;
 
+  const bust = Date.now();
   const endpoints = [
-    `https://decapi.me/twitch/uptime/${encodeURIComponent(username)}`,
-    `https://decapi.me/twitch/status/${encodeURIComponent(username)}`,
-    `https://decapi.me/twitch/stream/${encodeURIComponent(username)}`,
+    `https://decapi.me/twitch/uptime/${encodeURIComponent(username)}?cacheBust=${bust}`,
+    `https://decapi.me/twitch/status/${encodeURIComponent(username)}?cacheBust=${bust}`,
+    `https://decapi.me/twitch/stream/${encodeURIComponent(username)}?cacheBust=${bust}`,
   ];
 
   for (let attempt = 1; attempt <= 4; attempt++) {
@@ -368,7 +372,7 @@ async function getTwitchStatusStrict(username) {
 }
 
 // =====================
-// YouTube (RSS)
+// YouTube (RSS) + cacheBust
 // =====================
 function extractYoutubeChannelIdFromUrl(youtubeUrl) {
   if (!youtubeUrl) return null;
@@ -400,7 +404,7 @@ function extractYoutubeHandleFromUrl(youtubeUrl) {
 }
 
 function ytRssUrl(channelId) {
-  return `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`;
+  return `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}&cacheBust=${Date.now()}`;
 }
 
 function detectLiveFromRss(rssText) {
@@ -446,7 +450,7 @@ async function resolveYoutubeChannelId(youtubeUrl) {
     return null;
   }
 
-  const pageUrl = `https://www.youtube.com/@${encodeURIComponent(handle)}`;
+  const pageUrl = `https://www.youtube.com/@${encodeURIComponent(handle)}?cacheBust=${Date.now()}`;
   const html = await fetchTextAnyWayAllowHtml(pageUrl, 20000);
   const id = extractChannelIdFromYoutubeHtml(html);
 
@@ -475,7 +479,7 @@ async function getYoutubeStatusStrict(youtubeUrl) {
 }
 
 // =====================
-// Kick (через kick api v2 via proxy)
+// Kick (через kick api v2 via proxy) + cacheBust
 // =====================
 function parseKickUsername(kickUrl) {
   try {
@@ -495,9 +499,9 @@ async function getKickStatusStrict(kickUrl) {
   const cached = getTtl(statusCache, key, STATUS_TTL_MS);
   if (cached !== null) return cached;
 
-  const apiUrl = `https://kick.com/api/v2/channels/${encodeURIComponent(username)}`;
-  const text = await fetchTextAnyWayAllowHtml(apiUrl, 15000);
+  const apiUrl = `https://kick.com/api/v2/channels/${encodeURIComponent(username)}?cacheBust=${Date.now()}`;
 
+  const text = await fetchTextAnyWayAllowHtml(apiUrl, 15000);
   if (!text) {
     setTtl(statusCache, key, false);
     return false;
@@ -853,11 +857,7 @@ async function updateAllStreamers(forceRefresh = false) {
     if (container) container.innerHTML = "";
     const frag = document.createDocumentFragment();
     streamers.forEach((s) => {
-      const card = createStreamerCard(s, {
-        avatar: null,
-        nick: "Загрузка...",
-        steamId: "Загрузка...",
-      });
+      const card = createStreamerCard(s, { avatar: null, nick: "Загрузка...", steamId: "Загрузка..." });
       frag.appendChild(card);
       cards.push({ card, s });
     });
@@ -905,25 +905,12 @@ async function updateAllStreamers(forceRefresh = false) {
           return;
         }
 
-        // ✅ ГЛАВНОЕ ИСПРАВЛЕНИЕ:
-        // Проверяем ВСЕ платформы и итоговый статус = online если ХОТЯ БЫ ОДНА true
+        // ✅ ONLINE если хотя бы одна платформа true (без приоритета Twitch)
         const tasks = [];
 
-        if (s.twitch) {
-          tasks.push(
-            getTwitchStatusStrict(parseTwitchUsername(s.twitch)).catch(() => false)
-          );
-        }
-        if (s.youtube) {
-          tasks.push(
-            getYoutubeStatusStrict(s.youtube).catch(() => false)
-          );
-        }
-        if (s.kick) {
-          tasks.push(
-            getKickStatusStrict(s.kick).catch(() => false)
-          );
-        }
+        if (s.twitch) tasks.push(getTwitchStatusStrict(parseTwitchUsername(s.twitch)).catch(() => false));
+        if (s.youtube) tasks.push(getYoutubeStatusStrict(s.youtube).catch(() => false));
+        if (s.kick) tasks.push(getKickStatusStrict(s.kick).catch(() => false));
 
         const results = await Promise.all(tasks);
         const online = results.some(Boolean);
@@ -931,7 +918,6 @@ async function updateAllStreamers(forceRefresh = false) {
         setIndicator(card, online);
         card._status = online ? 0 : 1;
         statusDone++;
-        return;
       })
     );
 
