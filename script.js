@@ -145,7 +145,7 @@ const ICONS = {
   steam: "https://img.icons8.com/ios-filled/50/66b2ff/steam.png",
   twitch: "https://img.icons8.com/ios-glyphs/30/66b2ff/twitch.png",
   youtube: "https://img.icons8.com/ios-filled/30/66b2ff/youtube-play.png",
-  kick: letterIconDataUri("K"),
+  kick: "https://kick.com/favicon.ico",
 };
 
 // =====================
