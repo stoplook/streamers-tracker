@@ -114,6 +114,7 @@ h1 {
   gap: 8px;
   width: 350px;
   box-sizing: border-box;
+  position: relative; /* для админ-кнопок */
 }
 
 .avatar-wrapper {
@@ -169,9 +170,6 @@ h1 {
 .steam-id {
   color: #66b2ff;
   font-size: 14px;
-}
-
-.steam-id {
   text-decoration: none;
   cursor: pointer;
 }
@@ -301,10 +299,10 @@ h1 {
   color: #66b2ff;
   cursor: pointer;
   z-index: 10001;
-  display: none; /* показываем только когда есть токен / или по клику */
+  display: none;
   backdrop-filter: blur(6px);
   transition: 0.2s;
-  opacity: 0.22; /* “неприметная” */
+  opacity: 0.22;
 }
 #admin-fab { top: 14px; }
 #new-streamer-fab { top: 60px; }
@@ -316,11 +314,7 @@ h1 {
   border-color: #66b2ff;
 }
 
-#admin-fab.is-visible {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
+#admin-fab.is-visible,
 #new-streamer-fab.is-visible {
   display: inline-flex;
   align-items: center;
@@ -330,10 +324,6 @@ h1 {
 /* =======================
    Admin: per-card controls
    ======================= */
-.streamer {
-  position: relative;
-}
-
 .admin-card-actions {
   position: absolute;
   top: 8px;
@@ -432,9 +422,7 @@ h1 {
   color: #fff;
   outline: none;
 }
-.admin-input:focus {
-  border-color: rgba(102,178,255,0.9);
-}
+.admin-input:focus { border-color: rgba(102,178,255,0.9); }
 
 .admin-actions {
   display: flex;
@@ -469,4 +457,18 @@ h1 {
   font-size: 13px;
   color: #66b2ff;
   min-height: 18px;
+}
+
+/* =======================
+   NEW: Kick + TikTok grid
+   ======================= */
+.admin-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+@media (max-width: 600px) {
+  .admin-grid-2 { grid-template-columns: 1fr; }
 }
