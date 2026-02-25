@@ -1,5 +1,5 @@
 console.log(
-  "SCRIPT VERSION: v6 - STREAMERS + ADMIN CRUD + KICK/TIKTOK",
+  "SCRIPT VERSION: v7 - STREAMERS + ADMIN CRUD + KICK/TIKTOK + ICONS + BETTER TIKTOK LIVE",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -40,7 +40,9 @@ async function adminApi(path, opts = {}) {
 function setAdminUiVisible() {
   const adminFab = document.getElementById("admin-fab");
   const newFab = document.getElementById("new-streamer-fab");
+  // ⚙ всегда видна (чтобы можно было вставить токен)
   adminFab?.classList?.add("is-visible");
+  // + только когда токен валиден
   newFab?.classList?.toggle?.("is-visible", !!adminEnabled);
 }
 
@@ -54,6 +56,7 @@ function applyAdminToExistingCards() {
 
 async function tryEnableAdmin() {
   try {
+    // Нужен эндпоинт в worker.js: GET /admin/ping -> {ok:true} с проверкой токена
     await adminApi(`/admin/ping`, { method: "GET" });
     adminEnabled = true;
   } catch {
@@ -63,6 +66,9 @@ async function tryEnableAdmin() {
   applyAdminToExistingCards();
 }
 
+// =====================
+// Data
+// =====================
 let streamers = [];
 
 // грузим список стримеров из WORKER API (без кеша)
@@ -89,7 +95,9 @@ async function loadStreamersList() {
     }));
 }
 
+// =====================
 // DOM
+// =====================
 const loader = document.getElementById("loader");
 const loaderOverlay = document.getElementById("loader-overlay");
 const lastUpdateEl = document.getElementById("last-update");
@@ -203,9 +211,9 @@ function proxied(url) {
 async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
   try {
     const s = String(url);
-    const isSteamOrYoutube = s.includes("steamcommunity.com") || s.includes("youtube.com");
+    const mustProxy = s.includes("steamcommunity.com") || s.includes("youtube.com") || s.includes("tiktok.com");
 
-    if (isSteamOrYoutube) return await fetchText(proxied(url), timeout);
+    if (mustProxy) return await fetchText(proxied(url), timeout);
 
     const direct = await fetchText(url, timeout);
     if (direct) return direct;
@@ -219,9 +227,9 @@ async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
 async function fetchTextAnyWayAllowHtml(url, timeout = FETCH_TIMEOUT_MS) {
   try {
     const s = String(url);
-    const isSteamOrYoutube = s.includes("steamcommunity.com") || s.includes("youtube.com");
+    const mustProxy = s.includes("steamcommunity.com") || s.includes("youtube.com") || s.includes("tiktok.com");
 
-    if (isSteamOrYoutube) return await fetchText(proxied(url), timeout);
+    if (mustProxy) return await fetchText(proxied(url), timeout);
 
     const direct = await fetchText(url, timeout);
     if (direct) return direct;
@@ -485,7 +493,7 @@ async function getKickStatusStrict(kickUrl) {
 }
 
 // =====================
-// TikTok (best-effort)
+// TikTok (stricter best-effort)
 // =====================
 function parseTiktokUsername(tiktokUrl) {
   try {
@@ -506,20 +514,87 @@ async function getTiktokStatusStrict(tiktokUrl) {
   if (cached !== null) return cached;
 
   const pageUrl = `https://www.tiktok.com/@${encodeURIComponent(username)}/live`;
-  const html = await fetchTextAnyWayAllowHtml(pageUrl, 15000);
+  const html = await fetchTextAnyWayAllowHtml(pageUrl, 18000);
+
   if (!html) {
     setTtl(statusCache, key, false);
     return false;
   }
 
   const s = html.toLowerCase();
-  const online =
-    s.includes('"islive":true') ||
-    s.includes('"livestatus":1') ||
-    s.includes('"live":true');
+
+  // явные оффлайн сигналы
+  const offlineSignals = [
+    "islive\":false",
+    "liveRoomStatus\":0",
+    "live_room_status\":0",
+    "this live has ended",
+    "live has ended",
+    "currently not live",
+    "no live videos",
+  ];
+  if (offlineSignals.some(x => s.includes(x.toLowerCase()))) {
+    setTtl(statusCache, key, false);
+    return false;
+  }
+
+  // онлайновые сигналы: roomId + isLive true / status 1
+  const hasRoomId =
+    /"roomid"\s*:\s*"\d+"/i.test(html) ||
+    /"roomId"\s*:\s*"\d+"/i.test(html) ||
+    /"room_id"\s*:\s*"\d+"/i.test(html);
+
+  const isLiveTrue =
+    /"isLive"\s*:\s*true/i.test(html) ||
+    /"islive"\s*:\s*true/i.test(html) ||
+    /"liveRoomStatus"\s*:\s*1/i.test(html) ||
+    /"live_room_status"\s*:\s*1/i.test(html);
+
+  const online = hasRoomId && isLiveTrue;
 
   setTtl(statusCache, key, online);
   return online;
+}
+
+// =====================
+// Icons (inline SVG, no external 404)
+// =====================
+function svgIcon(name) {
+  const icons = {
+    twitch: `
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path fill="currentColor" d="M4 2h18v12l-5 5h-4l-2 2H8v-2H4V2zm2 2v13h3v2.5L11.5 17H17l3-3V4H6zm7 3h2v6h-2V7zm-4 0h2v6H9V7z"/>
+      </svg>`,
+    youtube: `
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path fill="currentColor" d="M23 12s0-3.4-.4-5c-.2-.9-.9-1.6-1.8-1.8C19.2 5 12 5s-7.2 0-8.8.2c-.9.2-1.6.9-1.8 1.8C1 8.6 1 12 1 12s0 3.4.4 5c.2.9.9 1.6 1.8 1.8C4.8 19 12 19s7.2 0 8.8-.2c.9-.2 1.6-.9 1.8-1.8.4-1.6.4-5 .4-5zM10 15.2V8.8L16 12l-6 3.2z"/>
+      </svg>`,
+    kick: `
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path fill="currentColor" d="M4 3h10v3H9v4h5v3H9v5H6V3H4v18h3v-2h2v2h3v-3h-3v-5h5v-3h-5V6h5V3H4z"/>
+      </svg>`,
+    tiktok: `
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path fill="currentColor" d="M14 3v10.2a3.8 3.8 0 1 1-3-3.7V6.2a7.2 7.2 0 1 0 6 7.1V8.5c1.2.9 2.7 1.4 4 1.5V6.7c-1.4-.2-3.6-1.1-4-3.7H14z"/>
+      </svg>`,
+    steam: `
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+        <path fill="currentColor" d="M16.7 2a5.3 5.3 0 0 0-5.2 4.4l-3.3 2.4c-.4-.2-.8-.3-1.3-.3A3.9 3.9 0 0 0 3 12.4l2.4 1a3.1 3.1 0 0 0 3 2.6 3.2 3.2 0 0 0 3.2-3.2c0-.1 0-.3 0-.4l2.5-3.2h.6A5.3 5.3 0 0 0 16.7 2zm0 1.8a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zM6.1 10.4c.3 0 .7.1 1 .2l2.3 1a2 2 0 0 1-1 3.7c-.8 0-1.5-.5-1.8-1.2l1.2.5c.9.4 1.9 0 2.3-.9.4-.9 0-1.9-.9-2.3l-1.9-.8c.2-.1.5-.2.8-.2zm10.6-4.7a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4z"/>
+      </svg>`,
+  };
+  return icons[name] || "";
+}
+
+function makeIconBtn(kind, href, title) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.className = "icon-btn";
+  a.title = title || kind;
+  a.setAttribute("aria-label", title || kind);
+  a.innerHTML = svgIcon(kind);
+  return a;
 }
 
 // =====================
@@ -685,19 +760,6 @@ streamerSave?.addEventListener?.("click", async () => {
 });
 
 // =====================
-// UI helpers
-// =====================
-function badge(text) {
-  const b = document.createElement("span");
-  b.textContent = text;
-  b.style.cssText =
-    "display:inline-flex;align-items:center;justify-content:center;" +
-    "height:32px;padding:0 10px;border:1px solid #66b2ff;border-radius:5px;" +
-    "color:#66b2ff;font-weight:600;font-size:12px;text-decoration:none";
-  return b;
-}
-
-// =====================
 // UI card
 // =====================
 function createStreamerCard(s, data) {
@@ -706,6 +768,7 @@ function createStreamerCard(s, data) {
   el._steamUrl = s.steamUrl;
   el._id = s.id;
 
+  // admin buttons
   const adminActions = document.createElement("div");
   adminActions.className = "admin-card-actions";
   adminActions.style.display = adminEnabled ? "flex" : "none";
@@ -734,6 +797,7 @@ function createStreamerCard(s, data) {
 
   el.appendChild(adminActions);
 
+  // avatar + indicator
   const avatarWrapper = document.createElement("div");
   avatarWrapper.className = "avatar-wrapper";
   avatarWrapper.style.position = "relative";
@@ -753,6 +817,7 @@ function createStreamerCard(s, data) {
 
   el.appendChild(avatarWrapper);
 
+  // info
   const infoWrapper = document.createElement("div");
   infoWrapper.className = "streamer-info";
   infoWrapper.innerHTML = `
@@ -782,6 +847,7 @@ function createStreamerCard(s, data) {
 
   el.appendChild(infoWrapper);
 
+  // buttons
   const buttonsWrapper = document.createElement("div");
   buttonsWrapper.className = "streamer-buttons";
 
@@ -790,7 +856,7 @@ function createStreamerCard(s, data) {
   steamBtn.target = "_blank";
   steamBtn.rel = "noopener noreferrer";
   steamBtn.className = "primary-btn";
-  steamBtn.innerHTML = `Открыть профиль`;
+  steamBtn.innerHTML = `${svgIcon("steam")}Открыть профиль`;
   buttonsWrapper.appendChild(steamBtn);
 
   const iconGroup = document.createElement("div");
@@ -806,42 +872,10 @@ function createStreamerCard(s, data) {
     iconGroup.appendChild(bm);
   }
 
-  if (s.twitch) {
-    const a = document.createElement("a");
-    a.href = s.twitch;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.className = "icon-btn";
-    a.textContent = "TW";
-    iconGroup.appendChild(a);
-  }
-  if (s.youtube) {
-    const a = document.createElement("a");
-    a.href = s.youtube;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.className = "icon-btn";
-    a.textContent = "YT";
-    iconGroup.appendChild(a);
-  }
-  if (s.kick) {
-    const a = document.createElement("a");
-    a.href = s.kick;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.className = "icon-btn";
-    a.textContent = "K";
-    iconGroup.appendChild(a);
-  }
-  if (s.tiktok) {
-    const a = document.createElement("a");
-    a.href = s.tiktok;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.className = "icon-btn";
-    a.textContent = "TT";
-    iconGroup.appendChild(a);
-  }
+  if (s.twitch) iconGroup.appendChild(makeIconBtn("twitch", s.twitch, "Twitch"));
+  if (s.youtube) iconGroup.appendChild(makeIconBtn("youtube", s.youtube, "YouTube"));
+  if (s.kick) iconGroup.appendChild(makeIconBtn("kick", s.kick, "Kick"));
+  if (s.tiktok) iconGroup.appendChild(makeIconBtn("tiktok", s.tiktok, "TikTok"));
 
   buttonsWrapper.appendChild(iconGroup);
   el.appendChild(buttonsWrapper);
