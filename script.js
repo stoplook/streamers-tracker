@@ -479,15 +479,11 @@ async function getYoutubeStatusStrict(youtubeUrl) {
   if (cached !== null) return cached;
 
   const apiUrl = `${WORKER_BASE}/status/youtube?u=${encodeURIComponent(youtubeUrl)}&v=${Date.now()}`;
-  const text = await fetchTextAnyWayAllowHtml(apiUrl, 18000);
-
-  if (!text) {
-    setTtl(statusCache, key, false);
-    return false;
-  }
 
   try {
-    const data = JSON.parse(text);
+    const res = await fetch(apiUrl, { cache: "no-store" });
+    const data = await res.json();
+
     const online = !!data?.online;
     setTtl(statusCache, key, online);
     return online;
@@ -496,6 +492,7 @@ async function getYoutubeStatusStrict(youtubeUrl) {
     return false;
   }
 }
+
 
 // =====================
 // Kick (через kick api v2 via proxy) + cacheBust
