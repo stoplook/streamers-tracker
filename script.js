@@ -1,5 +1,5 @@
 console.log(
-  "SCRIPT VERSION: v7 - STREAMERS + ADMIN CRUD + KICK/TIKTOK (ICONS FIX + STATUS FIX)",
+  "SCRIPT VERSION: v7-noTT - STREAMERS + ADMIN CRUD + KICK (TikTok removed)",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -92,7 +92,7 @@ async function loadStreamersList() {
       youtube: x.youtube ? String(x.youtube).trim() : undefined,
       battleMetrics: x.battleMetrics ? String(x.battleMetrics).trim() : undefined,
       kick: x.kick ? String(x.kick).trim() : undefined,
-      tiktok: x.tiktok ? String(x.tiktok).trim() : undefined,
+      // tiktok удалили из фронта
     }));
 }
 
@@ -120,7 +120,6 @@ const STATUS_CONCURRENCY = 4;
 
 const GREEN = "#00ff5f";
 const RED = "#ff4444";
-const GRAY = "#6f6f6f"; // когда не можем понять (TikTok часто)
 
 // Default avatar
 const DEFAULT_AVATAR =
@@ -131,7 +130,7 @@ const DEFAULT_AVATAR =
 </svg>`);
 
 // =====================
-// “Иконки” без SVG path (чтоб не было ошибок d="Expected number")
+// “Иконки” без SVG path
 // =====================
 function letterIconDataUri(letter) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">
@@ -147,7 +146,6 @@ const ICONS = {
   twitch: "https://img.icons8.com/ios-glyphs/30/66b2ff/twitch.png",
   youtube: "https://img.icons8.com/ios-filled/30/66b2ff/youtube-play.png",
   kick: letterIconDataUri("K"),
-  tiktok: letterIconDataUri("TT"),
 };
 
 // =====================
@@ -231,19 +229,17 @@ function proxied(url) {
 }
 
 /**
- * Всегда проксируем “проблемные” домены (CORS/антибот):
+ * Проксируем “проблемные” домены:
  * - steamcommunity.com
  * - youtube.com
  * - kick.com
- * - tiktok.com
  */
 function shouldForceProxy(url) {
   const s = String(url);
   return (
     s.includes("steamcommunity.com") ||
     s.includes("youtube.com") ||
-    s.includes("kick.com") ||
-    s.includes("tiktok.com")
+    s.includes("kick.com")
   );
 }
 
@@ -380,7 +376,7 @@ async function getTwitchStatusStrict(username) {
 }
 
 // =====================
-// YouTube (RSS, как было)
+// YouTube (RSS)
 // =====================
 function extractYoutubeChannelIdFromUrl(youtubeUrl) {
   if (!youtubeUrl) return null;
@@ -487,7 +483,7 @@ async function getYoutubeStatusStrict(youtubeUrl) {
 }
 
 // =====================
-// Kick (ВАЖНО: через proxy)
+// Kick (через kick api v2 via proxy)
 // =====================
 function parseKickUsername(kickUrl) {
   try {
@@ -509,7 +505,6 @@ async function getKickStatusStrict(kickUrl) {
 
   const apiUrl = `https://kick.com/api/v2/channels/${encodeURIComponent(username)}`;
 
-  // kick часто CORS-ит, поэтому забираем через worker proxy гарантированно
   const text = await fetchTextAnyWayAllowHtml(apiUrl, 15000);
   if (!text) {
     setTtl(statusCache, key, false);
@@ -525,66 +520,6 @@ async function getKickStatusStrict(kickUrl) {
     setTtl(statusCache, key, false);
     return false;
   }
-}
-
-// =====================
-// TikTok (best-effort, НЕ врёт)
-// Возврат: true/false/null (null = не смогли определить)
-// =====================
-function parseTiktokUsername(tiktokUrl) {
-  try {
-    const u = new URL(tiktokUrl);
-    return u.pathname.replace(/^\/+|\/+$/g, "").replace(/^@/, "");
-  } catch {
-    const m = String(tiktokUrl).match(/tiktok\.com\/@([^/?#]+)/i);
-    return m ? m[1] : null;
-  }
-}
-
-async function getTiktokStatusBestEffort(tiktokUrl) {
-  const username = parseTiktokUsername(tiktokUrl);
-  if (!username) return null;
-
-  const key = `tt:${username.toLowerCase()}`;
-  const cached = getTtl(statusCache, key, STATUS_TTL_MS);
-  if (cached !== null) return cached;
-
-  // TikTok очень часто отдает разные страницы/челленджи/антибот.
-  // Поэтому: если не нашли явный “live”, ставим null (неизвестно), а не false/true.
-  const pageUrl = `https://www.tiktok.com/@${encodeURIComponent(username)}/live`;
-  const html = await fetchTextAnyWayAllowHtml(pageUrl, 15000);
-  if (!html) {
-    setTtl(statusCache, key, null);
-    return null;
-  }
-
-  const s = html.toLowerCase();
-
-  // ЯВНЫЕ маркеры live (могут меняться, но это самые частые)
-  const isOnline =
-    s.includes('"islive":true') ||
-    s.includes('"livestatus":1') ||
-    s.includes('"live":true') ||
-    s.includes('"roomid"') && s.includes('"live"');
-
-  if (isOnline) {
-    setTtl(statusCache, key, true);
-    return true;
-  }
-
-  // Если страница явно говорит “offline”
-  const isOffline =
-    s.includes('"islive":false') ||
-    s.includes('"livestatus":0');
-
-  if (isOffline) {
-    setTtl(statusCache, key, false);
-    return false;
-  }
-
-  // Иначе: не уверены
-  setTtl(statusCache, key, null);
-  return null;
 }
 
 // =====================
@@ -615,7 +550,8 @@ const fTwitch = document.getElementById("streamer-twitch");
 const fYoutube = document.getElementById("streamer-youtube");
 const fBm = document.getElementById("streamer-battleMetrics");
 const fKick = document.getElementById("streamer-kick");
-const fTiktok = document.getElementById("streamer-tiktok");
+// const fTiktok удалили
+const fTiktok = document.getElementById("streamer-tiktok"); // можно оставить в форме, но фронт не использует
 
 function openModal(modal) {
   modal?.classList?.add("is-open");
@@ -641,7 +577,7 @@ function openStreamerModal(mode, s) {
     if (fYoutube) fYoutube.value = "";
     if (fBm) fBm.value = "";
     if (fKick) fKick.value = "";
-    if (fTiktok) fTiktok.value = "";
+    if (fTiktok) fTiktok.value = ""; // чистим поле, но оно не влияет
   } else {
     streamerTitle && (streamerTitle.textContent = "Редактировать стримера");
     if (fId) fId.value = (s?.id ?? "");
@@ -651,7 +587,7 @@ function openStreamerModal(mode, s) {
     if (fYoutube) fYoutube.value = (s?.youtube ?? "");
     if (fBm) fBm.value = (s?.battleMetrics ?? "");
     if (fKick) fKick.value = (s?.kick ?? "");
-    if (fTiktok) fTiktok.value = (s?.tiktok ?? "");
+    if (fTiktok) fTiktok.value = ""; // не подставляем, чтобы не путаться
   }
 
   openModal(streamerModal);
@@ -715,6 +651,7 @@ streamerSave?.addEventListener?.("click", async () => {
       youtube: (fYoutube?.value || "").trim() || null,
       battleMetrics: (fBm?.value || "").trim() || null,
       kick: (fKick?.value || "").trim() || null,
+      // tiktok оставим в базе как было, но фронт его не использует
       tiktok: (fTiktok?.value || "").trim() || null,
     };
 
@@ -806,7 +743,8 @@ function createStreamerCard(s, data) {
   img.src = data.avatar || DEFAULT_AVATAR;
   avatarWrapper.appendChild(img);
 
-  if (s.twitch || s.youtube || s.kick || s.tiktok) {
+  // индикатор только если есть twitch/youtube/kick
+  if (s.twitch || s.youtube || s.kick) {
     const indicator = document.createElement("span");
     indicator.style.cssText =
       "position:absolute;top:4px;right:4px;width:12px;height:12px;border-radius:50%;" +
@@ -873,7 +811,6 @@ function createStreamerCard(s, data) {
   if (s.twitch) iconGroup.appendChild(makeIconBtn(s.twitch, ICONS.twitch, "twitch"));
   if (s.youtube) iconGroup.appendChild(makeIconBtn(s.youtube, ICONS.youtube, "youtube"));
   if (s.kick) iconGroup.appendChild(makeIconBtn(s.kick, ICONS.kick, "kick"));
-  if (s.tiktok) iconGroup.appendChild(makeIconBtn(s.tiktok, ICONS.tiktok, "tiktok"));
 
   buttonsWrapper.appendChild(iconGroup);
   el.appendChild(buttonsWrapper);
@@ -882,11 +819,9 @@ function createStreamerCard(s, data) {
 }
 
 function setIndicator(card, status) {
-  // status: true / false / null
+  // status: true / false
   if (!card._indicatorEl) return;
-  if (status === true) card._indicatorEl.style.background = GREEN;
-  else if (status === false) card._indicatorEl.style.background = RED;
-  else card._indicatorEl.style.background = GRAY; // неизвестно
+  card._indicatorEl.style.background = status ? GREEN : RED;
 }
 
 // =====================
@@ -973,13 +908,13 @@ async function updateAllStreamers(forceRefresh = false) {
         const s = streamers.find((st) => st.steamUrl === card._steamUrl);
         if (!s) return;
 
-        if (!s.twitch && !s.youtube && !s.kick && !s.tiktok) {
+        if (!s.twitch && !s.youtube && !s.kick) {
           card._status = 2;
           statusDone++;
           return;
         }
 
-        // приоритет: twitch -> youtube -> kick -> tiktok
+        // приоритет: twitch -> youtube -> kick
         if (s.twitch) {
           const online = await getTwitchStatusStrict(parseTwitchUsername(s.twitch));
           setIndicator(card, online);
@@ -1003,23 +938,13 @@ async function updateAllStreamers(forceRefresh = false) {
           statusDone++;
           return;
         }
-
-        if (s.tiktok) {
-          const online = await getTiktokStatusBestEffort(s.tiktok); // true/false/null
-          setIndicator(card, online);
-
-          // если null — считаем как “нет инфо”
-          card._status = (online === true) ? 0 : (online === false ? 1 : 2);
-          statusDone++;
-          return;
-        }
       })
     );
 
     setLoading(true, `Проверяем статусы... ${statusDone}/${total}`);
   }
 
-  // sort online -> offline -> no info
+  // sort online -> offline -> no links
   cardsArray.sort((a, b) => {
     const sa = typeof a._status === "number" ? a._status : 1;
     const sb = typeof b._status === "number" ? b._status : 1;
