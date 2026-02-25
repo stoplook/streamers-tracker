@@ -1,7 +1,7 @@
 console.log("FRONT BUILD ✅", new Date().toISOString(), Math.random());
 
 console.log(
-  "SCRIPT VERSION: v9-noTT-OR-NOCACHE - STREAMERS + ADMIN CRUD + KICK (TikTok removed)",
+  "SCRIPT VERSION: v9 - OR-NOCACHE (online if ANY platform online)",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
