@@ -1,5 +1,5 @@
 console.log(
-  "SCRIPT VERSION: v5.1 - STREAMERS + ADMIN CRUD (WORKER D1) + instant admin buttons",
+  "SCRIPT VERSION: v6 - STREAMERS + ADMIN CRUD + KICK/TIKTOK",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -32,22 +32,15 @@ async function adminApi(path, opts = {}) {
   });
   const text = await res.text();
   let data = null;
-  try {
-    data = JSON.parse(text);
-  } catch {}
-  if (!res.ok) {
-    throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
-  }
+  try { data = JSON.parse(text); } catch {}
+  if (!res.ok) throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
   return data ?? text;
 }
 
 function setAdminUiVisible() {
   const adminFab = document.getElementById("admin-fab");
   const newFab = document.getElementById("new-streamer-fab");
-
-  // ⚙ всегда видна (чтобы можно было вставить токен)
   adminFab?.classList?.add("is-visible");
-  // + только когда токен валиден
   newFab?.classList?.toggle?.("is-visible", !!adminEnabled);
 }
 
@@ -59,16 +52,12 @@ function applyAdminToExistingCards() {
   }
 }
 
-// Проверяем токен без изменения базы:
-// дергаем DELETE /streamers без id -> пройдет auth -> получим 400 Missing id
 async function tryEnableAdmin() {
   try {
-    await adminApi(`/streamers`, { method: "DELETE" });
+    await adminApi(`/admin/ping`, { method: "GET" });
     adminEnabled = true;
-  } catch (e) {
-    const msg = String(e?.message || "").toLowerCase();
-    if (msg.includes("missing id")) adminEnabled = true;
-    else adminEnabled = false;
+  } catch {
+    adminEnabled = false;
   }
   setAdminUiVisible();
   applyAdminToExistingCards();
@@ -86,16 +75,17 @@ async function loadStreamersList() {
   const data = await res.json();
   if (!Array.isArray(data)) throw new Error("/streamers должен вернуть массив");
 
-  // лёгкая нормализация + сохраняем id (для редактирования/удаления)
   streamers = data
-    .filter((x) => x && x.realName && x.steamUrl)
-    .map((x) => ({
+    .filter(x => x && x.realName && x.steamUrl)
+    .map(x => ({
       id: x.id,
       realName: String(x.realName).trim(),
       steamUrl: String(x.steamUrl).trim(),
       twitch: x.twitch ? String(x.twitch).trim() : undefined,
       youtube: x.youtube ? String(x.youtube).trim() : undefined,
       battleMetrics: x.battleMetrics ? String(x.battleMetrics).trim() : undefined,
+      kick: x.kick ? String(x.kick).trim() : undefined,
+      tiktok: x.tiktok ? String(x.tiktok).trim() : undefined,
     }));
 }
 
@@ -112,9 +102,9 @@ if (refreshBtn) refreshBtn.textContent = "Обновить данные";
 // =====================
 // App settings
 // =====================
-const STEAM_TTL_MS = 5 * 60 * 1000; // 5 минут
-const STATUS_TTL_MS = 60 * 1000; // 1 минута
-const YT_CHANNEL_TTL_MS = 12 * 60 * 60 * 1000; // 12 часов
+const STEAM_TTL_MS = 5 * 60 * 1000;
+const STATUS_TTL_MS = 60 * 1000;
+const YT_CHANNEL_TTL_MS = 12 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15000;
 const STEAM_CONCURRENCY = 3;
 const STATUS_CONCURRENCY = 4;
@@ -184,9 +174,7 @@ async function fetchText(url, timeout = FETCH_TIMEOUT_MS) {
 
   const timeoutPromise = new Promise((resolve) => {
     timer = setTimeout(() => {
-      try {
-        controller.abort();
-      } catch {}
+      try { controller.abort(); } catch {}
       resolve(null);
     }, timeout);
   });
@@ -212,19 +200,12 @@ function proxied(url) {
   return `${WORKER_PROXY}${encodeURIComponent(url)}`;
 }
 
-/*
-  fetchTextAnyWay:
-   - steamcommunity.com и youtube.com -> сразу через WORKER_PROXY (чтобы убрать CORS)
-   - остальные -> пробуем прямой fetch, если нет -> через WORKER_PROXY
-*/
 async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
   try {
     const s = String(url);
     const isSteamOrYoutube = s.includes("steamcommunity.com") || s.includes("youtube.com");
 
-    if (isSteamOrYoutube) {
-      return await fetchText(proxied(url), timeout);
-    }
+    if (isSteamOrYoutube) return await fetchText(proxied(url), timeout);
 
     const direct = await fetchText(url, timeout);
     if (direct) return direct;
@@ -235,15 +216,12 @@ async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
   return null;
 }
 
-// “включая HTML” — нужно для YouTube handle -> channelId
 async function fetchTextAnyWayAllowHtml(url, timeout = FETCH_TIMEOUT_MS) {
   try {
     const s = String(url);
     const isSteamOrYoutube = s.includes("steamcommunity.com") || s.includes("youtube.com");
 
-    if (isSteamOrYoutube) {
-      return await fetchText(proxied(url), timeout);
-    }
+    if (isSteamOrYoutube) return await fetchText(proxied(url), timeout);
 
     const direct = await fetchText(url, timeout);
     if (direct) return direct;
@@ -361,7 +339,7 @@ async function getTwitchStatusStrict(username) {
 }
 
 // =====================
-// YouTube (front-only)
+// YouTube
 // =====================
 function extractYoutubeChannelIdFromUrl(youtubeUrl) {
   if (!youtubeUrl) return null;
@@ -399,13 +377,10 @@ function ytRssUrl(channelId) {
 function detectLiveFromRss(rssText) {
   if (!rssText) return false;
   const s = rssText.toLowerCase();
-
   if (s.includes("yt:livebroadcastcontent") && s.includes(">live<")) return true;
   if (s.includes('"islivecontent":true')) return true;
-
   const hasEntry = s.includes("<entry");
   if (hasEntry && s.includes("live")) return true;
-
   return false;
 }
 
@@ -471,6 +446,83 @@ async function getYoutubeStatusStrict(youtubeUrl) {
 }
 
 // =====================
+// Kick
+// =====================
+function parseKickUsername(kickUrl) {
+  try {
+    const u = new URL(kickUrl);
+    return u.pathname.replace(/^\/+|\/+$/g, "");
+  } catch {
+    const m = String(kickUrl).match(/kick\.com\/([^/?#]+)/i);
+    return m ? m[1] : null;
+  }
+}
+
+async function getKickStatusStrict(kickUrl) {
+  const username = parseKickUsername(kickUrl);
+  if (!username) return false;
+
+  const key = `kick:${username.toLowerCase()}`;
+  const cached = getTtl(statusCache, key, STATUS_TTL_MS);
+  if (cached !== null) return cached;
+
+  const apiUrl = `https://kick.com/api/v2/channels/${encodeURIComponent(username)}`;
+  const text = await fetchTextAnyWay(apiUrl, 15000);
+  if (!text) {
+    setTtl(statusCache, key, false);
+    return false;
+  }
+
+  try {
+    const data = JSON.parse(text);
+    const online = !!data?.livestream;
+    setTtl(statusCache, key, online);
+    return online;
+  } catch {
+    setTtl(statusCache, key, false);
+    return false;
+  }
+}
+
+// =====================
+// TikTok (best-effort)
+// =====================
+function parseTiktokUsername(tiktokUrl) {
+  try {
+    const u = new URL(tiktokUrl);
+    return u.pathname.replace(/^\/+|\/+$/g, "").replace(/^@/, "");
+  } catch {
+    const m = String(tiktokUrl).match(/tiktok\.com\/@([^/?#]+)/i);
+    return m ? m[1] : null;
+  }
+}
+
+async function getTiktokStatusStrict(tiktokUrl) {
+  const username = parseTiktokUsername(tiktokUrl);
+  if (!username) return false;
+
+  const key = `tt:${username.toLowerCase()}`;
+  const cached = getTtl(statusCache, key, STATUS_TTL_MS);
+  if (cached !== null) return cached;
+
+  const pageUrl = `https://www.tiktok.com/@${encodeURIComponent(username)}/live`;
+  const html = await fetchTextAnyWayAllowHtml(pageUrl, 15000);
+  if (!html) {
+    setTtl(statusCache, key, false);
+    return false;
+  }
+
+  const s = html.toLowerCase();
+  const online =
+    s.includes('"islive":true') ||
+    s.includes('"livestatus":1') ||
+    s.includes('"live":true');
+
+  setTtl(statusCache, key, online);
+  return online;
+}
+
+// =====================
 // Admin modals wiring (requires index.html admin blocks)
 // =====================
 const adminFab = document.getElementById("admin-fab");
@@ -497,6 +549,8 @@ const fSteamUrl = document.getElementById("streamer-steamUrl");
 const fTwitch = document.getElementById("streamer-twitch");
 const fYoutube = document.getElementById("streamer-youtube");
 const fBm = document.getElementById("streamer-battleMetrics");
+const fKick = document.getElementById("streamer-kick");
+const fTiktok = document.getElementById("streamer-tiktok");
 
 function openModal(modal) {
   modal?.classList?.add("is-open");
@@ -510,11 +564,6 @@ function setHint(el, text) {
   if (el) el.textContent = text || "";
 }
 
-async function refreshAdminState() {
-  setAdminUiVisible();
-  applyAdminToExistingCards();
-}
-
 function openStreamerModal(mode, s) {
   setHint(streamerHint, "");
 
@@ -526,6 +575,8 @@ function openStreamerModal(mode, s) {
     if (fTwitch) fTwitch.value = "";
     if (fYoutube) fYoutube.value = "";
     if (fBm) fBm.value = "";
+    if (fKick) fKick.value = "";
+    if (fTiktok) fTiktok.value = "";
   } else {
     streamerTitle && (streamerTitle.textContent = "Редактировать стримера");
     if (fId) fId.value = (s?.id ?? "");
@@ -534,6 +585,8 @@ function openStreamerModal(mode, s) {
     if (fTwitch) fTwitch.value = (s?.twitch ?? "");
     if (fYoutube) fYoutube.value = (s?.youtube ?? "");
     if (fBm) fBm.value = (s?.battleMetrics ?? "");
+    if (fKick) fKick.value = (s?.kick ?? "");
+    if (fTiktok) fTiktok.value = (s?.tiktok ?? "");
   }
 
   openModal(streamerModal);
@@ -560,10 +613,9 @@ streamerModal?.querySelector?.(".admin-modal__backdrop")?.addEventListener?.("cl
 adminSave?.addEventListener?.("click", async () => {
   adminToken = (adminTokenInput?.value || "").trim();
   localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
-  setHint(adminHint, "Проверяем токен...");
+  setHint(adminHint, "Проверяем...");
   await tryEnableAdmin();
-  setHint(adminHint, adminEnabled ? "✅ Админ-режим включен" : "❌ Неверный токен");
-  await refreshAdminState();
+  setHint(adminHint, adminEnabled ? "✅ Админ включен" : "❌ Неверный токен");
 });
 
 adminClear?.addEventListener?.("click", async () => {
@@ -571,31 +623,25 @@ adminClear?.addEventListener?.("click", async () => {
   localStorage.removeItem(ADMIN_TOKEN_KEY);
   adminEnabled = false;
   if (adminTokenInput) adminTokenInput.value = "";
+  setAdminUiVisible();
+  applyAdminToExistingCards();
   setHint(adminHint, "Очищено");
-  await refreshAdminState();
 });
 
 adminTest?.addEventListener?.("click", async () => {
-  setHint(adminHint, "Проверяем токен...");
+  setHint(adminHint, "Проверяем...");
   await tryEnableAdmin();
-  setHint(adminHint, adminEnabled ? "✅ Токен валиден" : "❌ Неверный токен");
-  await refreshAdminState();
+  setHint(adminHint, adminEnabled ? "✅ Ок" : "❌ Неверный токен");
 });
 
 newStreamerFab?.addEventListener?.("click", () => {
-  if (!adminEnabled) {
-    showPopup("🔒 Нужен токен");
-    return;
-  }
+  if (!adminEnabled) return showPopup("🔒 Нужен токен");
   openStreamerModal("new");
 });
 
 streamerSave?.addEventListener?.("click", async () => {
   try {
-    if (!adminEnabled) {
-      setHint(streamerHint, "🔒 Нужен токен");
-      return;
-    }
+    if (!adminEnabled) return setHint(streamerHint, "🔒 Нужен токен");
 
     const body = {
       realName: (fRealName?.value || "").trim(),
@@ -603,11 +649,12 @@ streamerSave?.addEventListener?.("click", async () => {
       twitch: (fTwitch?.value || "").trim() || null,
       youtube: (fYoutube?.value || "").trim() || null,
       battleMetrics: (fBm?.value || "").trim() || null,
+      kick: (fKick?.value || "").trim() || null,
+      tiktok: (fTiktok?.value || "").trim() || null,
     };
 
     if (!body.realName || !body.steamUrl) {
-      setHint(streamerHint, "Нужны минимум Real name и Steam URL");
-      return;
+      return setHint(streamerHint, "Нужны минимум Real name и Steam URL");
     }
 
     const id = (fId?.value || "").trim();
@@ -638,6 +685,19 @@ streamerSave?.addEventListener?.("click", async () => {
 });
 
 // =====================
+// UI helpers
+// =====================
+function badge(text) {
+  const b = document.createElement("span");
+  b.textContent = text;
+  b.style.cssText =
+    "display:inline-flex;align-items:center;justify-content:center;" +
+    "height:32px;padding:0 10px;border:1px solid #66b2ff;border-radius:5px;" +
+    "color:#66b2ff;font-weight:600;font-size:12px;text-decoration:none";
+  return b;
+}
+
+// =====================
 // UI card
 // =====================
 function createStreamerCard(s, data) {
@@ -646,7 +706,6 @@ function createStreamerCard(s, data) {
   el._steamUrl = s.steamUrl;
   el._id = s.id;
 
-  // admin controls (появятся только в админ-режиме)
   const adminActions = document.createElement("div");
   adminActions.className = "admin-card-actions";
   adminActions.style.display = adminEnabled ? "flex" : "none";
@@ -656,17 +715,11 @@ function createStreamerCard(s, data) {
   `;
 
   const btns = adminActions.querySelectorAll("button");
-  const editBtn = btns[0];
-  const delBtn = btns[1];
-
-  editBtn.onclick = () => openStreamerModal("edit", s);
-  delBtn.onclick = async () => {
+  btns[0].onclick = () => openStreamerModal("edit", s);
+  btns[1].onclick = async () => {
     try {
       if (!adminEnabled) return;
-      if (!s.id) {
-        showPopup("❌ Нет id у записи");
-        return;
-      }
+      if (!s.id) return showPopup("❌ Нет id");
       if (!confirm(`Удалить "${s.realName}"?`)) return;
       await adminApi(`/streamers?id=${encodeURIComponent(s.id)}`, { method: "DELETE" });
       showPopup("✅ Удалено");
@@ -689,12 +742,11 @@ function createStreamerCard(s, data) {
   img.src = data.avatar || DEFAULT_AVATAR;
   avatarWrapper.appendChild(img);
 
-  if (s.twitch || s.youtube) {
+  if (s.twitch || s.youtube || s.kick || s.tiktok) {
     const indicator = document.createElement("span");
     indicator.style.cssText =
       "position:absolute;top:4px;right:4px;width:12px;height:12px;border-radius:50%;" +
-      "box-shadow:0 0 4px rgba(0,0,0,0.5);background:" +
-      RED;
+      "box-shadow:0 0 4px rgba(0,0,0,0.5);background:" + RED;
     avatarWrapper.appendChild(indicator);
     el._indicatorEl = indicator;
   }
@@ -721,12 +773,8 @@ function createStreamerCard(s, data) {
   el._steamIdEl?.addEventListener?.("click", async () => {
     const text = el._steamIdEl?.textContent || "";
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        showPopup("✅ Скопировано!");
-      } else {
-        showPopup("❌ Clipboard недоступен");
-      }
+      await navigator.clipboard.writeText(text);
+      showPopup("✅ Скопировано!");
     } catch {
       showPopup("❌ Не удалось скопировать");
     }
@@ -742,7 +790,7 @@ function createStreamerCard(s, data) {
   steamBtn.target = "_blank";
   steamBtn.rel = "noopener noreferrer";
   steamBtn.className = "primary-btn";
-  steamBtn.innerHTML = `<img src="https://img.icons8.com/ios-filled/50/66b2ff/steam.png" alt="steam"/>Открыть профиль`;
+  steamBtn.innerHTML = `Открыть профиль`;
   buttonsWrapper.appendChild(steamBtn);
 
   const iconGroup = document.createElement("div");
@@ -757,23 +805,42 @@ function createStreamerCard(s, data) {
     bm.textContent = "BattleMetrics";
     iconGroup.appendChild(bm);
   }
+
   if (s.twitch) {
-    const tw = document.createElement("a");
-    tw.href = s.twitch;
-    tw.target = "_blank";
-    tw.rel = "noopener noreferrer";
-    tw.className = "icon-btn";
-    tw.innerHTML = `<img src="https://img.icons8.com/ios-glyphs/30/66b2ff/twitch.png" alt="twitch"/>`;
-    iconGroup.appendChild(tw);
+    const a = document.createElement("a");
+    a.href = s.twitch;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "icon-btn";
+    a.textContent = "TW";
+    iconGroup.appendChild(a);
   }
   if (s.youtube) {
-    const yt = document.createElement("a");
-    yt.href = s.youtube;
-    yt.target = "_blank";
-    yt.rel = "noopener noreferrer";
-    yt.className = "icon-btn";
-    yt.innerHTML = `<img src="https://img.icons8.com/ios-filled/30/66b2ff/youtube-play.png" alt="youtube"/>`;
-    iconGroup.appendChild(yt);
+    const a = document.createElement("a");
+    a.href = s.youtube;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "icon-btn";
+    a.textContent = "YT";
+    iconGroup.appendChild(a);
+  }
+  if (s.kick) {
+    const a = document.createElement("a");
+    a.href = s.kick;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "icon-btn";
+    a.textContent = "K";
+    iconGroup.appendChild(a);
+  }
+  if (s.tiktok) {
+    const a = document.createElement("a");
+    a.href = s.tiktok;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "icon-btn";
+    a.textContent = "TT";
+    iconGroup.appendChild(a);
   }
 
   buttonsWrapper.appendChild(iconGroup);
@@ -817,7 +884,6 @@ function startCountdown() {
 // =====================
 async function updateAllStreamers(forceRefresh = false) {
   const total = streamers.length;
-
   setLoading(true, `Подтягиваем данные Steam… 0/${total}`);
 
   const cards = [];
@@ -830,11 +896,7 @@ async function updateAllStreamers(forceRefresh = false) {
     if (container) container.innerHTML = "";
     const frag = document.createDocumentFragment();
     streamers.forEach((s) => {
-      const card = createStreamerCard(s, {
-        avatar: null,
-        nick: "Загрузка...",
-        steamId: "Загрузка...",
-      });
+      const card = createStreamerCard(s, { avatar: null, nick: "Загрузка...", steamId: "Загрузка..." });
       frag.appendChild(card);
       cards.push({ card, s });
     });
@@ -858,7 +920,7 @@ async function updateAllStreamers(forceRefresh = false) {
     setLoading(true, `Подтягиваем данные Steam… ${steamDone}/${total}`);
   }
 
-  setLoading(true, `Проверяем статусы стримов... 0/${total}`);
+  setLoading(true, `Проверяем статусы... 0/${total}`);
 
   const cardsArray = Array.from(container?.children || []);
   const HARD_LIMIT_MS = 90000;
@@ -874,15 +936,15 @@ async function updateAllStreamers(forceRefresh = false) {
         const s = streamers.find((st) => st.steamUrl === card._steamUrl);
         if (!s) return;
 
-        if (!s.twitch && !s.youtube) {
+        if (!s.twitch && !s.youtube && !s.kick && !s.tiktok) {
           card._status = 2;
           statusDone++;
           return;
         }
 
+        // приоритет: twitch -> youtube -> kick -> tiktok
         if (s.twitch) {
-          const username = parseTwitchUsername(s.twitch);
-          const online = await getTwitchStatusStrict(username);
+          const online = await getTwitchStatusStrict(parseTwitchUsername(s.twitch));
           setIndicatorStrict(card, online);
           card._status = online ? 0 : 1;
           statusDone++;
@@ -896,10 +958,26 @@ async function updateAllStreamers(forceRefresh = false) {
           statusDone++;
           return;
         }
+
+        if (s.kick) {
+          const online = await getKickStatusStrict(s.kick);
+          setIndicatorStrict(card, online);
+          card._status = online ? 0 : 1;
+          statusDone++;
+          return;
+        }
+
+        if (s.tiktok) {
+          const online = await getTiktokStatusStrict(s.tiktok);
+          setIndicatorStrict(card, online);
+          card._status = online ? 0 : 1;
+          statusDone++;
+          return;
+        }
       })
     );
 
-    setLoading(true, `Проверяем статусы стримов... ${statusDone}/${total}`);
+    setLoading(true, `Проверяем статусы... ${statusDone}/${total}`);
   }
 
   // sort online -> offline -> no info
@@ -924,8 +1002,6 @@ async function updateAllStreamers(forceRefresh = false) {
   lastUpdateTime = new Date().toLocaleTimeString();
   updateLastUpdateText();
   applySearchFilter();
-
-  // на всякий случай: если админ включен — покажем кнопки и после пересортировки
   applyAdminToExistingCards();
 }
 
@@ -935,7 +1011,6 @@ refreshBtn?.addEventListener?.("click", async () => {
     statusCache.clear();
     ytChannelCache.clear();
 
-    // важно: заново подтягиваем список из базы
     await loadStreamersList();
     await updateAllStreamers(true);
 
@@ -953,10 +1028,8 @@ refreshBtn?.addEventListener?.("click", async () => {
     await loadStreamersList();
     await updateAllStreamers(true);
 
-    // admin buttons
     setAdminUiVisible();
     if (adminToken) await tryEnableAdmin();
-    applyAdminToExistingCards();
 
     startCountdown();
   } catch (e) {
