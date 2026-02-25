@@ -1,3 +1,5 @@
+console.log("FRONT BUILD ✅", new Date().toISOString(), Math.random());
+
 console.log(
   "SCRIPT VERSION: v7-noTT - STREAMERS + ADMIN CRUD + KICK (TikTok removed)",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
