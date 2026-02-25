@@ -1,5 +1,5 @@
 console.log(
-  "SCRIPT VERSION: v8 - FIX ICONS (NO SVG PATH), RESTORE KICK STATUS, STRICTER TIKTOK",
+  "SCRIPT VERSION: v7 - STREAMERS + ADMIN CRUD + KICK/TIKTOK (ICONS FIX + STATUS FIX)",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -32,15 +32,19 @@ async function adminApi(path, opts = {}) {
   });
   const text = await res.text();
   let data = null;
-  try { data = JSON.parse(text); } catch {}
-  if (!res.ok) throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
+  try {
+    data = JSON.parse(text);
+  } catch {}
+  if (!res.ok) {
+    throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
+  }
   return data ?? text;
 }
 
 function setAdminUiVisible() {
   const adminFab = document.getElementById("admin-fab");
   const newFab = document.getElementById("new-streamer-fab");
-  // ⚙ всегда видна
+  // ⚙ всегда видна (чтобы вставить токен)
   adminFab?.classList?.add("is-visible");
   // + только когда токен валиден
   newFab?.classList?.toggle?.("is-visible", !!adminEnabled);
@@ -66,7 +70,7 @@ async function tryEnableAdmin() {
 }
 
 // =====================
-// Streamers list
+// Data
 // =====================
 let streamers = [];
 
@@ -79,8 +83,8 @@ async function loadStreamersList() {
   if (!Array.isArray(data)) throw new Error("/streamers должен вернуть массив");
 
   streamers = data
-    .filter(x => x && x.realName && x.steamUrl)
-    .map(x => ({
+    .filter((x) => x && x.realName && x.steamUrl)
+    .map((x) => ({
       id: x.id,
       realName: String(x.realName).trim(),
       steamUrl: String(x.steamUrl).trim(),
@@ -116,6 +120,7 @@ const STATUS_CONCURRENCY = 4;
 
 const GREEN = "#00ff5f";
 const RED = "#ff4444";
+const GRAY = "#6f6f6f"; // когда не можем понять (TikTok часто)
 
 // Default avatar
 const DEFAULT_AVATAR =
@@ -124,6 +129,26 @@ const DEFAULT_AVATAR =
   <rect width="80" height="80" fill="#181818" rx="40" ry="40"/>
   <text x="50%" y="50%" font-size="16" fill="#66b2ff" font-family="Inter, sans-serif" font-weight="600" text-anchor="middle" dominant-baseline="central">?</text>
 </svg>`);
+
+// =====================
+// “Иконки” без SVG path (чтоб не было ошибок d="Expected number")
+// =====================
+function letterIconDataUri(letter) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+    <rect x="0" y="0" width="18" height="18" rx="4" ry="4" fill="none" stroke="#66b2ff" stroke-width="1.5"/>
+    <text x="50%" y="52%" font-family="Inter, Arial, sans-serif" font-size="9.5" font-weight="700"
+      fill="#66b2ff" text-anchor="middle" dominant-baseline="middle">${letter}</text>
+  </svg>`;
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+}
+
+const ICONS = {
+  steam: "https://img.icons8.com/ios-filled/50/66b2ff/steam.png",
+  twitch: "https://img.icons8.com/ios-glyphs/30/66b2ff/twitch.png",
+  youtube: "https://img.icons8.com/ios-filled/30/66b2ff/youtube-play.png",
+  kick: letterIconDataUri("K"),
+  tiktok: letterIconDataUri("TT"),
+};
 
 // =====================
 // Popup
@@ -205,20 +230,39 @@ function proxied(url) {
   return `${WORKER_PROXY}${encodeURIComponent(url)}`;
 }
 
-/*
-  fetchTextAnyWay:
-   - steamcommunity.com, youtube.com, tiktok.com -> через proxy (CORS/anti-bot)
-   - остальные -> direct, если нет -> proxy
-*/
+/**
+ * Всегда проксируем “проблемные” домены (CORS/антибот):
+ * - steamcommunity.com
+ * - youtube.com
+ * - kick.com
+ * - tiktok.com
+ */
+function shouldForceProxy(url) {
+  const s = String(url);
+  return (
+    s.includes("steamcommunity.com") ||
+    s.includes("youtube.com") ||
+    s.includes("kick.com") ||
+    s.includes("tiktok.com")
+  );
+}
+
 async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
   try {
-    const s = String(url);
-    const forceProxy =
-      s.includes("steamcommunity.com") ||
-      s.includes("youtube.com") ||
-      s.includes("tiktok.com");
+    if (shouldForceProxy(url)) return await fetchText(proxied(url), timeout);
 
-    if (forceProxy) return await fetchText(proxied(url), timeout);
+    const direct = await fetchText(url, timeout);
+    if (direct) return direct;
+
+    const t = await fetchText(proxied(url), timeout);
+    if (t && !t.includes("<!DOCTYPE html") && !t.includes("<html")) return t;
+  } catch {}
+  return null;
+}
+
+async function fetchTextAnyWayAllowHtml(url, timeout = FETCH_TIMEOUT_MS) {
+  try {
+    if (shouldForceProxy(url)) return await fetchText(proxied(url), timeout);
 
     const direct = await fetchText(url, timeout);
     if (direct) return direct;
@@ -226,11 +270,6 @@ async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
     return await fetchText(proxied(url), timeout);
   } catch {}
   return null;
-}
-
-async function fetchTextAnyWayAllowHtml(url, timeout = FETCH_TIMEOUT_MS) {
-  // для TikTok/YouTube нам нужно принять HTML (не отбрасываем)
-  return await fetchTextAnyWay(url, timeout);
 }
 
 // =====================
@@ -290,7 +329,7 @@ async function fetchSteamProfileWithRetry(steamUrl, maxAttempts = 4, delay = 110
 }
 
 // =====================
-// Twitch
+// Twitch (через decapi)
 // =====================
 function parseTwitchUsername(twitchUrl) {
   try {
@@ -341,7 +380,7 @@ async function getTwitchStatusStrict(username) {
 }
 
 // =====================
-// YouTube (как было)
+// YouTube (RSS, как было)
 // =====================
 function extractYoutubeChannelIdFromUrl(youtubeUrl) {
   if (!youtubeUrl) return null;
@@ -448,7 +487,7 @@ async function getYoutubeStatusStrict(youtubeUrl) {
 }
 
 // =====================
-// Kick (ВОЗВРАЩАЕМ как работало)
+// Kick (ВАЖНО: через proxy)
 // =====================
 function parseKickUsername(kickUrl) {
   try {
@@ -469,7 +508,9 @@ async function getKickStatusStrict(kickUrl) {
   if (cached !== null) return cached;
 
   const apiUrl = `https://kick.com/api/v2/channels/${encodeURIComponent(username)}`;
-  const text = await fetchTextAnyWay(apiUrl, 15000);
+
+  // kick часто CORS-ит, поэтому забираем через worker proxy гарантированно
+  const text = await fetchTextAnyWayAllowHtml(apiUrl, 15000);
   if (!text) {
     setTtl(statusCache, key, false);
     return false;
@@ -487,7 +528,8 @@ async function getKickStatusStrict(kickUrl) {
 }
 
 // =====================
-// TikTok (строже, меньше ложных online)
+// TikTok (best-effort, НЕ врёт)
+// Возврат: true/false/null (null = не смогли определить)
 // =====================
 function parseTiktokUsername(tiktokUrl) {
   try {
@@ -499,51 +541,50 @@ function parseTiktokUsername(tiktokUrl) {
   }
 }
 
-function looksLikeTiktokBotPage(htmlLower) {
-  return (
-    htmlLower.includes("verify you are human") ||
-    htmlLower.includes("captcha") ||
-    htmlLower.includes("access denied") ||
-    htmlLower.includes("not now") && htmlLower.includes("tiktok") && htmlLower.includes("browser") ||
-    htmlLower.includes("enable javascript") ||
-    htmlLower.includes("suspicious") ||
-    htmlLower.includes("blocked")
-  );
-}
-
-async function getTiktokStatusStrict(tiktokUrl) {
+async function getTiktokStatusBestEffort(tiktokUrl) {
   const username = parseTiktokUsername(tiktokUrl);
-  if (!username) return false;
+  if (!username) return null;
 
   const key = `tt:${username.toLowerCase()}`;
   const cached = getTtl(statusCache, key, STATUS_TTL_MS);
   if (cached !== null) return cached;
 
-  // /live страница часто защищена, но пробуем
+  // TikTok очень часто отдает разные страницы/челленджи/антибот.
+  // Поэтому: если не нашли явный “live”, ставим null (неизвестно), а не false/true.
   const pageUrl = `https://www.tiktok.com/@${encodeURIComponent(username)}/live`;
   const html = await fetchTextAnyWayAllowHtml(pageUrl, 15000);
   if (!html) {
-    setTtl(statusCache, key, false);
-    return false;
+    setTtl(statusCache, key, null);
+    return null;
   }
 
   const s = html.toLowerCase();
-  if (looksLikeTiktokBotPage(s)) {
-    // лучше "ложный оффлайн", чем "ложный онлайн"
+
+  // ЯВНЫЕ маркеры live (могут меняться, но это самые частые)
+  const isOnline =
+    s.includes('"islive":true') ||
+    s.includes('"livestatus":1') ||
+    s.includes('"live":true') ||
+    s.includes('"roomid"') && s.includes('"live"');
+
+  if (isOnline) {
+    setTtl(statusCache, key, true);
+    return true;
+  }
+
+  // Если страница явно говорит “offline”
+  const isOffline =
+    s.includes('"islive":false') ||
+    s.includes('"livestatus":0');
+
+  if (isOffline) {
     setTtl(statusCache, key, false);
     return false;
   }
 
-  // Строгие признаки live в данных страницы
-  const online =
-    s.includes('"islive":true') ||
-    s.includes('"liveRoomId"'.toLowerCase()) ||
-    s.includes('"livestatus":1') ||
-    s.includes('"status":2') && s.includes("livestream") ||
-    s.includes('"room_id"') && s.includes('"live"');
-
-  setTtl(statusCache, key, online);
-  return online;
+  // Иначе: не уверены
+  setTtl(statusCache, key, null);
+  return null;
 }
 
 // =====================
@@ -709,47 +750,15 @@ streamerSave?.addEventListener?.("click", async () => {
 });
 
 // =====================
-// Icon buttons (NO SVG PATH)
+// UI helpers
 // =====================
-function makeImgIcon(src, alt) {
-  const img = document.createElement("img");
-  img.src = src;
-  img.alt = alt || "";
-  img.width = 18;
-  img.height = 18;
-  img.loading = "lazy";
-  return img;
-}
-
-function makeLetterIcon(letter) {
-  // svg только с текстом (без path) => не будет ошибки <path d>
-  const svg = `
-  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">
-    <rect width="18" height="18" rx="4" ry="4" fill="none"/>
-    <text x="50%" y="52%" text-anchor="middle" dominant-baseline="middle"
-      font-family="Inter, Arial, sans-serif" font-size="10" font-weight="700" fill="#66b2ff">${letter}</text>
-  </svg>`;
-  const img = document.createElement("img");
-  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-  img.alt = letter;
-  img.width = 18;
-  img.height = 18;
-  return img;
-}
-
-function makeIconBtn(href, kind) {
+function makeIconBtn(href, iconSrc, alt) {
   const a = document.createElement("a");
   a.href = href;
   a.target = "_blank";
   a.rel = "noopener noreferrer";
   a.className = "icon-btn";
-
-  if (kind === "twitch") a.appendChild(makeImgIcon("https://img.icons8.com/ios-glyphs/30/66b2ff/twitch.png", "twitch"));
-  else if (kind === "youtube") a.appendChild(makeImgIcon("https://img.icons8.com/ios-filled/30/66b2ff/youtube-play.png", "youtube"));
-  else if (kind === "kick") a.appendChild(makeLetterIcon("K"));
-  else if (kind === "tiktok") a.appendChild(makeLetterIcon("TT"));
-  else a.appendChild(makeLetterIcon("?"));
-
+  a.innerHTML = `<img src="${iconSrc}" alt="${alt}"/>`;
   return a;
 }
 
@@ -762,7 +771,7 @@ function createStreamerCard(s, data) {
   el._steamUrl = s.steamUrl;
   el._id = s.id;
 
-  // admin mini
+  // admin controls
   const adminActions = document.createElement("div");
   adminActions.className = "admin-card-actions";
   adminActions.style.display = adminEnabled ? "flex" : "none";
@@ -770,7 +779,6 @@ function createStreamerCard(s, data) {
     <button class="admin-mini" type="button" title="Редактировать" aria-label="Редактировать">✏</button>
     <button class="admin-mini" type="button" title="Удалить" aria-label="Удалить">🗑</button>
   `;
-
   const btns = adminActions.querySelectorAll("button");
   btns[0].onclick = () => openStreamerModal("edit", s);
   btns[1].onclick = async () => {
@@ -788,10 +796,8 @@ function createStreamerCard(s, data) {
       showPopup("❌ Ошибка удаления");
     }
   };
-
   el.appendChild(adminActions);
 
-  // avatar
   const avatarWrapper = document.createElement("div");
   avatarWrapper.className = "avatar-wrapper";
   avatarWrapper.style.position = "relative";
@@ -811,7 +817,6 @@ function createStreamerCard(s, data) {
 
   el.appendChild(avatarWrapper);
 
-  // info
   const infoWrapper = document.createElement("div");
   infoWrapper.className = "streamer-info";
   infoWrapper.innerHTML = `
@@ -841,7 +846,6 @@ function createStreamerCard(s, data) {
 
   el.appendChild(infoWrapper);
 
-  // buttons
   const buttonsWrapper = document.createElement("div");
   buttonsWrapper.className = "streamer-buttons";
 
@@ -850,7 +854,7 @@ function createStreamerCard(s, data) {
   steamBtn.target = "_blank";
   steamBtn.rel = "noopener noreferrer";
   steamBtn.className = "primary-btn";
-  steamBtn.innerHTML = `<img src="https://img.icons8.com/ios-filled/50/66b2ff/steam.png" alt="steam"/>Открыть профиль`;
+  steamBtn.innerHTML = `<img src="${ICONS.steam}" alt="steam"/>Открыть профиль`;
   buttonsWrapper.appendChild(steamBtn);
 
   const iconGroup = document.createElement("div");
@@ -866,10 +870,10 @@ function createStreamerCard(s, data) {
     iconGroup.appendChild(bm);
   }
 
-  if (s.twitch) iconGroup.appendChild(makeIconBtn(s.twitch, "twitch"));
-  if (s.youtube) iconGroup.appendChild(makeIconBtn(s.youtube, "youtube"));
-  if (s.kick) iconGroup.appendChild(makeIconBtn(s.kick, "kick"));
-  if (s.tiktok) iconGroup.appendChild(makeIconBtn(s.tiktok, "tiktok"));
+  if (s.twitch) iconGroup.appendChild(makeIconBtn(s.twitch, ICONS.twitch, "twitch"));
+  if (s.youtube) iconGroup.appendChild(makeIconBtn(s.youtube, ICONS.youtube, "youtube"));
+  if (s.kick) iconGroup.appendChild(makeIconBtn(s.kick, ICONS.kick, "kick"));
+  if (s.tiktok) iconGroup.appendChild(makeIconBtn(s.tiktok, ICONS.tiktok, "tiktok"));
 
   buttonsWrapper.appendChild(iconGroup);
   el.appendChild(buttonsWrapper);
@@ -877,9 +881,12 @@ function createStreamerCard(s, data) {
   return el;
 }
 
-function setIndicatorStrict(card, online) {
+function setIndicator(card, status) {
+  // status: true / false / null
   if (!card._indicatorEl) return;
-  card._indicatorEl.style.background = online ? GREEN : RED;
+  if (status === true) card._indicatorEl.style.background = GREEN;
+  else if (status === false) card._indicatorEl.style.background = RED;
+  else card._indicatorEl.style.background = GRAY; // неизвестно
 }
 
 // =====================
@@ -931,6 +938,7 @@ async function updateAllStreamers(forceRefresh = false) {
     container?.appendChild?.(frag);
   }
 
+  // Steam fetch
   let steamDone = 0;
   for (let i = 0; i < cards.length; i += STEAM_CONCURRENCY) {
     const chunk = cards.slice(i, i + STEAM_CONCURRENCY);
@@ -948,6 +956,7 @@ async function updateAllStreamers(forceRefresh = false) {
     setLoading(true, `Подтягиваем данные Steam… ${steamDone}/${total}`);
   }
 
+  // Status fetch
   setLoading(true, `Проверяем статусы... 0/${total}`);
 
   const cardsArray = Array.from(container?.children || []);
@@ -973,7 +982,7 @@ async function updateAllStreamers(forceRefresh = false) {
         // приоритет: twitch -> youtube -> kick -> tiktok
         if (s.twitch) {
           const online = await getTwitchStatusStrict(parseTwitchUsername(s.twitch));
-          setIndicatorStrict(card, online);
+          setIndicator(card, online);
           card._status = online ? 0 : 1;
           statusDone++;
           return;
@@ -981,7 +990,7 @@ async function updateAllStreamers(forceRefresh = false) {
 
         if (s.youtube) {
           const online = await getYoutubeStatusStrict(s.youtube);
-          setIndicatorStrict(card, online);
+          setIndicator(card, online);
           card._status = online ? 0 : 1;
           statusDone++;
           return;
@@ -989,16 +998,18 @@ async function updateAllStreamers(forceRefresh = false) {
 
         if (s.kick) {
           const online = await getKickStatusStrict(s.kick);
-          setIndicatorStrict(card, online);
+          setIndicator(card, online);
           card._status = online ? 0 : 1;
           statusDone++;
           return;
         }
 
         if (s.tiktok) {
-          const online = await getTiktokStatusStrict(s.tiktok);
-          setIndicatorStrict(card, online);
-          card._status = online ? 0 : 1;
+          const online = await getTiktokStatusBestEffort(s.tiktok); // true/false/null
+          setIndicator(card, online);
+
+          // если null — считаем как “нет инфо”
+          card._status = (online === true) ? 0 : (online === false ? 1 : 2);
           statusDone++;
           return;
         }
