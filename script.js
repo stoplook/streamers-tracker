@@ -145,7 +145,10 @@ const ICONS = {
   steam: "https://img.icons8.com/ios-filled/50/66b2ff/steam.png",
   twitch: "https://img.icons8.com/ios-glyphs/30/66b2ff/twitch.png",
   youtube: "https://img.icons8.com/ios-filled/30/66b2ff/youtube-play.png",
-  kick: "https://kick.com/favicon.ico",
+  kick: `data:image/svg+xml;utf8,
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+  <path d="M4 3h6.5c3.5 0 5.5 1.8 5.5 4.5 0 2-1.2 3.5-3.1 4.2L17 21h-3.5l-3.6-8.5H7V21H4V3z"/>
+</svg>`
 };
 
 // =====================
