@@ -285,3 +285,188 @@ h1 {
   .icon-btn img { width: 16px; height: 16px; }
   #loader { font-size: 13px; }
 }
+
+/* =======================
+   Admin: floating buttons
+   ======================= */
+#admin-fab,
+#new-streamer-fab {
+  position: fixed;
+  right: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(102,178,255,0.45);
+  background: rgba(15,15,15,0.75);
+  color: #66b2ff;
+  cursor: pointer;
+  z-index: 10001;
+  display: none; /* показываем только когда есть токен / или по клику */
+  backdrop-filter: blur(6px);
+  transition: 0.2s;
+  opacity: 0.22; /* “неприметная” */
+}
+#admin-fab { top: 14px; }
+#new-streamer-fab { top: 60px; }
+
+#admin-fab:hover,
+#new-streamer-fab:hover {
+  opacity: 1;
+  background: rgba(102,178,255,0.08);
+  border-color: #66b2ff;
+}
+
+#admin-fab.is-visible {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#new-streamer-fab.is-visible {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* =======================
+   Admin: per-card controls
+   ======================= */
+.streamer {
+  position: relative;
+}
+
+.admin-card-actions {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: none;
+  gap: 6px;
+  z-index: 2;
+}
+.streamer:hover .admin-card-actions {
+  display: flex;
+}
+
+.admin-mini {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid rgba(102,178,255,0.6);
+  background: rgba(15,15,15,0.75);
+  color: #66b2ff;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: 0.2s;
+}
+.admin-mini:hover {
+  background: rgba(102,178,255,0.1);
+}
+
+/* =======================
+   Admin: modal
+   ======================= */
+.admin-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+}
+.admin-modal.is-open { display: block; }
+
+.admin-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+}
+
+.admin-modal__panel {
+  position: relative;
+  max-width: 520px;
+  margin: 60px auto;
+  background: #141414;
+  border: 1px solid rgba(102,178,255,0.35);
+  border-radius: 14px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  padding: 12px;
+}
+
+.admin-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 6px 10px;
+}
+
+.admin-modal__title {
+  font-weight: 600;
+  color: #c7d5e0;
+}
+
+.admin-x {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(102,178,255,0.35);
+  background: rgba(0,0,0,0.2);
+  color: #66b2ff;
+  cursor: pointer;
+}
+
+.admin-modal__body { padding: 6px; }
+
+.admin-label {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 12px;
+  color: #8a8a8a;
+}
+
+.admin-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(102,178,255,0.35);
+  background: rgba(0,0,0,0.2);
+  color: #fff;
+  outline: none;
+}
+.admin-input:focus {
+  border-color: rgba(102,178,255,0.9);
+}
+
+.admin-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.admin-btn {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #66b2ff;
+  background: rgba(102,178,255,0.08);
+  color: #66b2ff;
+  cursor: pointer;
+  font-weight: 600;
+}
+.admin-btn:hover { background: rgba(102,178,255,0.12); }
+
+.admin-btn2 {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(102,178,255,0.35);
+  background: rgba(0,0,0,0.2);
+  color: #c7d5e0;
+  cursor: pointer;
+}
+.admin-btn2:hover { background: rgba(255,255,255,0.04); }
+
+.admin-hint {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #66b2ff;
+  min-height: 18px;
+}
