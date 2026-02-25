@@ -1,32 +1,42 @@
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>Streamers Dashboard</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <title>Streamers Tracker</title>
+
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
-<h1>Streamers Tracker v1.0</h1>
+  <h1>Streamers Tracker v1.0</h1>
 
-<div class="top-controls">
-  <input type="text" id="search-input" placeholder="Поиск по имени / SteamID...">
-  <button id="refresh-btn">Обновить кэш</button>
-</div>
+  <div class="top-controls">
+    <input
+      type="text"
+      id="search-input"
+      placeholder="Поиск по имени / SteamID..."
+      autocomplete="off"
+      spellcheck="false"
+    />
+    <button id="refresh-btn" type="button">Обновить данные</button>
+  </div>
 
-<div id="last-update">Последнее обновление: —</div>
+  <div id="last-update" aria-live="polite">Последнее обновление: —</div>
 
-<div id="streamers-container"></div>
+  <div id="streamers-container"></div>
 
-<!-- Loader -->
-<div id="loader-overlay"></div>
-<div id="loader">
-  <div class="loader-spinner"></div>
-  <div class="loader-text">Обновляем данные...</div>
-</div>
+  <!-- Loader -->
+  <div id="loader-overlay" aria-hidden="true"></div>
+  <div id="loader" role="status" aria-live="polite" aria-label="Загрузка">
+    <div class="loader-spinner" aria-hidden="true"></div>
+    <div class="loader-text">Обновляем данные...</div>
+  </div>
 
-<!-- Pop-up контейнер -->
-<div class="popup-container"></div>
+  <!-- Pop-up контейнер -->
+  <div class="popup-container" aria-live="polite" aria-atomic="true"></div>
 
-<script src="script.js"></script>
+  <script src="script.js" defer></script>
 </body>
 </html>
