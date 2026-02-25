@@ -1,5 +1,5 @@
 console.log(
-  "SCRIPT VERSION: v8 - STREAMERS + ADMIN CRUD + KICK/TIKTOK via WORKER STATUS (RED/GREEN ONLY)",
+  "SCRIPT VERSION: v9 - FIXED: stable streamer matching (by id), status loop by cards, kick cache-bust",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -73,6 +73,29 @@ async function tryEnableAdmin() {
 // Data
 // =====================
 let streamers = [];
+let streamersById = new Map();
+let streamersBySteamUrl = new Map();
+
+function normalizeSteamUrl(u) {
+  if (!u) return "";
+  let s = String(u).trim();
+  // убрать пробелы/двойные слэши на конце
+  s = s.replace(/\s+/g, "");
+  // унифицировать протокол
+  s = s.replace(/^http:\/\//i, "https://");
+  // убрать trailing slash
+  s = s.replace(/\/+$/g, "");
+  return s.toLowerCase();
+}
+
+function rebuildIndexes() {
+  streamersById = new Map();
+  streamersBySteamUrl = new Map();
+  for (const s of streamers) {
+    if (s?.id != null) streamersById.set(String(s.id), s);
+    if (s?.steamUrl) streamersBySteamUrl.set(normalizeSteamUrl(s.steamUrl), s);
+  }
+}
 
 async function loadStreamersList() {
   const url = `${STREAMERS_API}?v=${Date.now()}`;
@@ -94,6 +117,8 @@ async function loadStreamersList() {
       kick: x.kick ? String(x.kick).trim() : undefined,
       tiktok: x.tiktok ? String(x.tiktok).trim() : undefined,
     }));
+
+  rebuildIndexes();
 }
 
 // =====================
@@ -130,7 +155,7 @@ const DEFAULT_AVATAR =
 </svg>`);
 
 // =====================
-// “Иконки” без SVG path (чтоб не было ошибок d="Expected number")
+// Icons
 // =====================
 function letterIconDataUri(letter) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">
@@ -211,7 +236,8 @@ async function fetchText(url, timeout = FETCH_TIMEOUT_MS) {
   try {
     const fetchPromise = fetch(url, {
       signal: controller.signal,
-      headers: { Accept: "*/*" },
+      headers: { Accept: "*/*", "Cache-Control": "no-cache", Pragma: "no-cache" },
+      cache: "no-store",
     })
       .then((r) => (r && r.ok ? r.text() : null))
       .catch(() => null);
@@ -229,17 +255,9 @@ function proxied(url) {
   return `${WORKER_PROXY}${encodeURIComponent(url)}`;
 }
 
-/**
- * Проксируем домены где CORS/ограничения.
- * (Kick/TikTok статус теперь берём с воркера /status/*, так что тут они не нужны,
- * но оставляем steam/youtube.)
- */
 function shouldForceProxy(url) {
   const s = String(url);
-  return (
-    s.includes("steamcommunity.com") ||
-    s.includes("youtube.com")
-  );
+  return s.includes("steamcommunity.com") || s.includes("youtube.com");
 }
 
 async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
@@ -324,7 +342,7 @@ async function fetchSteamProfileWithRetry(steamUrl, maxAttempts = 4, delay = 110
 }
 
 // =====================
-// Twitch (через decapi)
+// Twitch (decapi)
 // =====================
 function parseTwitchUsername(twitchUrl) {
   try {
@@ -356,12 +374,10 @@ async function getTwitchStatusStrict(username) {
       if (!text) continue;
 
       const t = text.toLowerCase();
-
       if (t.includes("offline")) {
         setTtl(statusCache, key, false);
         return false;
       }
-
       if (!t.includes("error") && !t.includes("not found") && t.trim().length > 0) {
         setTtl(statusCache, key, true);
         return true;
@@ -482,7 +498,7 @@ async function getYoutubeStatusStrict(youtubeUrl) {
 }
 
 // =====================
-// Kick (через Worker /status/kick)
+// Kick (via Worker /status/kick)
 // =====================
 function parseKickUsername(kickUrl) {
   try {
@@ -502,10 +518,10 @@ async function getKickStatusStrict(kickUrl) {
   const cached = getTtl(statusCache, key, STATUS_TTL_MS);
   if (cached !== null) return cached;
 
-  const text = await fetchTextAnyWay(
-    `${STATUS_KICK_API}${encodeURIComponent(username)}`,
-    15000
-  );
+  // cache-bust на клиенте тоже
+  const url = `${STATUS_KICK_API}${encodeURIComponent(username)}&v=${Date.now()}`;
+  const text = await fetchTextAnyWay(url, 15000);
+
   if (!text) {
     setTtl(statusCache, key, false);
     return false;
@@ -523,7 +539,7 @@ async function getKickStatusStrict(kickUrl) {
 }
 
 // =====================
-// TikTok (через Worker /status/tiktok) - всегда boolean
+// TikTok (via Worker /status/tiktok) - пока не трогаем по твоей просьбе
 // =====================
 function parseTiktokUsername(tiktokUrl) {
   try {
@@ -543,10 +559,9 @@ async function getTiktokStatusStrict(tiktokUrl) {
   const cached = getTtl(statusCache, key, STATUS_TTL_MS);
   if (cached !== null) return cached;
 
-  const text = await fetchTextAnyWay(
-    `${STATUS_TIKTOK_API}${encodeURIComponent(username)}`,
-    15000
-  );
+  const url = `${STATUS_TIKTOK_API}${encodeURIComponent(username)}&v=${Date.now()}`;
+  const text = await fetchTextAnyWay(url, 15000);
+
   if (!text) {
     setTtl(statusCache, key, false);
     return false;
@@ -744,10 +759,9 @@ function makeIconBtn(href, iconSrc, alt) {
 function createStreamerCard(s, data) {
   const el = document.createElement("div");
   el.className = "streamer";
+  el._id = s.id != null ? String(s.id) : "";
   el._steamUrl = s.steamUrl;
-  el._id = s.id;
 
-  // admin controls
   const adminActions = document.createElement("div");
   adminActions.className = "admin-card-actions";
   adminActions.style.display = adminEnabled ? "flex" : "none";
@@ -888,16 +902,30 @@ function startCountdown() {
 }
 
 // =====================
+// Helper: get streamer for card (FIXED)
+// =====================
+function getStreamerForCard(card) {
+  const byId = card?._id ? streamersById.get(String(card._id)) : null;
+  if (byId) return byId;
+
+  const su = card?._steamUrl ? normalizeSteamUrl(card._steamUrl) : "";
+  if (su) return streamersBySteamUrl.get(su) || null;
+
+  return null;
+}
+
+// =====================
 // MAIN
 // =====================
 async function updateAllStreamers(forceRefresh = false) {
   const total = streamers.length;
   setLoading(true, `Подтягиваем данные Steam… 0/${total}`);
 
+  // Build / reuse cards list
   const cards = [];
   if (!forceRefresh && container && container.children.length > 0) {
     Array.from(container.children).forEach((card) => {
-      const s = streamers.find((st) => st.steamUrl === card._steamUrl);
+      const s = getStreamerForCard(card);
       if (s) cards.push({ card, s });
     });
   } else {
@@ -929,21 +957,19 @@ async function updateAllStreamers(forceRefresh = false) {
     setLoading(true, `Подтягиваем данные Steam… ${steamDone}/${total}`);
   }
 
-  // Status fetch
+  // Status fetch (FIXED: iterate by cards, not container.children)
   setLoading(true, `Проверяем статусы... 0/${total}`);
 
-  const cardsArray = Array.from(container?.children || []);
   const HARD_LIMIT_MS = 90000;
   const started = Date.now();
 
   let statusDone = 0;
-  for (let i = 0; i < cardsArray.length; i += STATUS_CONCURRENCY) {
+  for (let i = 0; i < cards.length; i += STATUS_CONCURRENCY) {
     if (Date.now() - started > HARD_LIMIT_MS) break;
 
-    const chunk = cardsArray.slice(i, i + STATUS_CONCURRENCY);
+    const chunk = cards.slice(i, i + STATUS_CONCURRENCY);
     await Promise.all(
-      chunk.map(async (card) => {
-        const s = streamers.find((st) => st.steamUrl === card._steamUrl);
+      chunk.map(async ({ card, s }) => {
         if (!s) return;
 
         if (!s.twitch && !s.youtube && !s.kick && !s.tiktok) {
@@ -952,7 +978,7 @@ async function updateAllStreamers(forceRefresh = false) {
           return;
         }
 
-        // приоритет: twitch -> youtube -> kick -> tiktok
+        // как у тебя: приоритет платформ
         if (s.twitch) {
           const online = await getTwitchStatusStrict(parseTwitchUsername(s.twitch));
           setIndicator(card, online);
@@ -984,6 +1010,10 @@ async function updateAllStreamers(forceRefresh = false) {
           statusDone++;
           return;
         }
+
+        // fallback
+        card._status = 2;
+        statusDone++;
       })
     );
 
@@ -991,7 +1021,8 @@ async function updateAllStreamers(forceRefresh = false) {
   }
 
   // sort online -> offline -> no links
-  cardsArray.sort((a, b) => {
+  const onlyCards = cards.map((x) => x.card);
+  onlyCards.sort((a, b) => {
     const sa = typeof a._status === "number" ? a._status : 1;
     const sb = typeof b._status === "number" ? b._status : 1;
     if (sa !== sb) return sa - sb;
@@ -1001,7 +1032,7 @@ async function updateAllStreamers(forceRefresh = false) {
   });
 
   const frag = document.createDocumentFragment();
-  cardsArray.forEach((card) => frag.appendChild(card));
+  onlyCards.forEach((card) => frag.appendChild(card));
   if (container) {
     container.innerHTML = "";
     container.appendChild(frag);
