@@ -472,3 +472,29 @@ h1 {
 @media (max-width: 600px) {
   .admin-grid-2 { grid-template-columns: 1fr; }
 }
+
+/* FIX: Kick/TikTok inside streamer modal even if classes were missed */
+#streamer-modal label{
+  display:block;
+  margin: 10px 0 6px;
+  font-size: 12px;
+  color: #8a8a8a;
+}
+
+/* если вдруг у Kick/TikTok нет class="admin-input" — задаём им стиль как admin-input */
+#streamer-kick,
+#streamer-tiktok{
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(102,178,255,0.35);
+  background: rgba(0,0,0,0.2);
+  color: #fff;
+  outline: none;
+}
+
+#streamer-kick:focus,
+#streamer-tiktok:focus{
+  border-color: rgba(102,178,255,0.9);
+}
