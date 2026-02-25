@@ -478,17 +478,23 @@ async function getYoutubeStatusStrict(youtubeUrl) {
   const cached = getTtl(statusCache, key, STATUS_TTL_MS);
   if (cached !== null) return cached;
 
-  const channelId = await resolveYoutubeChannelId(youtubeUrl);
-  if (!channelId) {
+  const apiUrl = `${WORKER_BASE}/status/youtube?u=${encodeURIComponent(youtubeUrl)}&v=${Date.now()}`;
+  const text = await fetchTextAnyWayAllowHtml(apiUrl, 18000);
+
+  if (!text) {
     setTtl(statusCache, key, false);
     return false;
   }
 
-  const rss = await fetchTextAnyWayAllowHtml(ytRssUrl(channelId), 18000);
-  const online = detectLiveFromRss(rss);
-
-  setTtl(statusCache, key, online);
-  return online;
+  try {
+    const data = JSON.parse(text);
+    const online = !!data?.online;
+    setTtl(statusCache, key, online);
+    return online;
+  } catch {
+    setTtl(statusCache, key, false);
+    return false;
+  }
 }
 
 // =====================
