@@ -1,0 +1,32 @@
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Streamers Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<h1>Streamers Tracker v1.0</h1>
+
+<div class="top-controls">
+  <input type="text" id="search-input" placeholder="Поиск по имени / SteamID...">
+  <button id="refresh-btn">Обновить кэш</button>
+</div>
+
+<div id="last-update">Последнее обновление: —</div>
+
+<div id="streamers-container"></div>
+
+<!-- Loader -->
+<div id="loader-overlay"></div>
+<div id="loader">
+  <div class="loader-spinner"></div>
+  <div class="loader-text">Обновляем данные...</div>
+</div>
+
+<!-- Pop-up контейнер -->
+<div class="popup-container"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
