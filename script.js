@@ -657,5 +657,14 @@ refreshBtn?.addEventListener?.('click', () => {
   showPopup('♻️ Кэш очищен!');
 });
 
-updateAllStreamers(false);
-startCountdown();
+(async () => {
+  try {
+    await loadStreamersList();
+    updateAllStreamers(false);
+    startCountdown();
+  } catch (e) {
+    console.error(e);
+    showPopup("❌ Не удалось загрузить список стримеров");
+    setLoading(false);
+  }
+})();
