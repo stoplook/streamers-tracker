@@ -1,5 +1,7 @@
+console.log("FRONT BUILD ✅", new Date().toISOString(), Math.random());
+
 console.log(
-  "SCRIPT VERSION: v9.1 - OR-NOCACHE (online if ANY platform online) + FIX YT RSS LIVE DETECT (no false green)",
+  "SCRIPT VERSION: v9-noTT-OR-NOCACHE - STREAMERS + ADMIN CRUD + KICK (TikTok removed)",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -209,7 +211,7 @@ async function fetchText(url, timeout = FETCH_TIMEOUT_MS) {
     const fetchPromise = fetch(url, {
       signal: controller.signal,
       headers: { Accept: "*/*" },
-      cache: "no-store",
+      cache: "no-store", // ✅ важно
     })
       .then((r) => (r && r.ok ? r.text() : null))
       .catch(() => null);
@@ -405,34 +407,14 @@ function ytRssUrl(channelId) {
   return `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}&cacheBust=${Date.now()}`;
 }
 
-// ✅ FIX: no “contains live word” heuristic; parse XML and check <yt:liveBroadcastContent> === "live"
 function detectLiveFromRss(rssText) {
   if (!rssText) return false;
-
-  try {
-    const xml = new DOMParser().parseFromString(rssText, "application/xml");
-
-    // If parsing failed, browser often creates <parsererror>
-    const parserError = xml.getElementsByTagName("parsererror")?.[0];
-    if (parserError) return false;
-
-    const entries = Array.from(xml.getElementsByTagName("entry") || []);
-    if (!entries.length) return false;
-
-    // YouTube live is typically in the latest entry
-    for (const entry of entries) {
-      const liveTag =
-        entry.getElementsByTagName("yt:liveBroadcastContent")?.[0] ||
-        entry.getElementsByTagName("liveBroadcastContent")?.[0];
-
-      const v = (liveTag?.textContent || "").trim().toLowerCase();
-      if (v === "live") return true;
-    }
-
-    return false;
-  } catch {
-    return false;
-  }
+  const s = rssText.toLowerCase();
+  if (s.includes("yt:livebroadcastcontent") && s.includes(">live<")) return true;
+  if (s.includes('"islivecontent":true')) return true;
+  const hasEntry = s.includes("<entry");
+  if (hasEntry && s.includes("live")) return true;
+  return false;
 }
 
 function extractChannelIdFromYoutubeHtml(html) {
@@ -923,7 +905,7 @@ async function updateAllStreamers(forceRefresh = false) {
           return;
         }
 
-        // ✅ ONLINE если хотя бы одна платформа true
+        // ✅ ONLINE если хотя бы одна платформа true (без приоритета Twitch)
         const tasks = [];
 
         if (s.twitch) tasks.push(getTwitchStatusStrict(parseTwitchUsername(s.twitch)).catch(() => false));
