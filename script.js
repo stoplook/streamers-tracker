@@ -1,5 +1,5 @@
 console.log(
-  "SCRIPT VERSION: v4 - STREAMERS FROM WORKER (D1)",
+  "SCRIPT VERSION: v5 - STREAMERS + ADMIN CRUD (WORKER D1)",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -9,6 +9,59 @@ console.log(
 const WORKER_BASE = "https://streamers-proxy.yasonsworkshop.workers.dev";
 const WORKER_PROXY = `${WORKER_BASE}/proxy?url=`;
 const STREAMERS_API = `${WORKER_BASE}/streamers`;
+
+// =====================
+// Admin (token + CRUD)
+// =====================
+const ADMIN_TOKEN_KEY = "st_admin_token";
+let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY) || "";
+let adminEnabled = false;
+
+function authHeaders(extra = {}) {
+  return Object.assign(
+    { "Content-Type": "application/json" },
+    extra,
+    adminToken ? { Authorization: "Bearer " + adminToken } : {}
+  );
+}
+
+async function adminApi(path, opts = {}) {
+  const res = await fetch(WORKER_BASE + path, {
+    ...opts,
+    headers: authHeaders(opts.headers || {}),
+  });
+  const text = await res.text();
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {}
+  if (!res.ok) throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
+  return data ?? text;
+}
+
+function setAdminUiVisible() {
+  const adminFab = document.getElementById("admin-fab");
+  const newFab = document.getElementById("new-streamer-fab");
+
+  // ⚙ всегда видна (чтобы можно было вставить токен)
+  adminFab?.classList?.add("is-visible");
+  // + только когда токен валиден
+  newFab?.classList?.toggle?.("is-visible", !!adminEnabled);
+}
+
+async function tryEnableAdmin() {
+  // Проверяем токен без изменения базы:
+  // дергаем DELETE /streamers без id -> пройдет auth -> получим 400 Missing id
+  try {
+    await adminApi(`/streamers`, { method: "DELETE" });
+    adminEnabled = true;
+  } catch (e) {
+    const msg = String(e?.message || "").toLowerCase();
+    if (msg.includes("missing id")) adminEnabled = true;
+    else adminEnabled = false;
+  }
+  setAdminUiVisible();
+}
 
 let streamers = [];
 
@@ -22,10 +75,11 @@ async function loadStreamersList() {
   const data = await res.json();
   if (!Array.isArray(data)) throw new Error("/streamers должен вернуть массив");
 
-  // лёгкая нормализация
+  // лёгкая нормализация + сохраняем id (для редактирования/удаления)
   streamers = data
-    .filter(x => x && x.realName && x.steamUrl)
-    .map(x => ({
+    .filter((x) => x && x.realName && x.steamUrl)
+    .map((x) => ({
+      id: x.id,
       realName: String(x.realName).trim(),
       steamUrl: String(x.steamUrl).trim(),
       twitch: x.twitch ? String(x.twitch).trim() : undefined,
@@ -406,12 +460,210 @@ async function getYoutubeStatusStrict(youtubeUrl) {
 }
 
 // =====================
+// Admin modals wiring (requires index.html admin blocks)
+// =====================
+const adminFab = document.getElementById("admin-fab");
+const newStreamerFab = document.getElementById("new-streamer-fab");
+
+const adminModal = document.getElementById("admin-modal");
+const adminClose = document.getElementById("admin-close");
+const adminTokenInput = document.getElementById("admin-token");
+const adminSave = document.getElementById("admin-save");
+const adminClear = document.getElementById("admin-clear");
+const adminTest = document.getElementById("admin-test");
+const adminHint = document.getElementById("admin-hint");
+
+const streamerModal = document.getElementById("streamer-modal");
+const streamerClose = document.getElementById("streamer-close");
+const streamerCancel = document.getElementById("streamer-cancel");
+const streamerSave = document.getElementById("streamer-save");
+const streamerHint = document.getElementById("streamer-hint");
+const streamerTitle = document.getElementById("streamer-modal-title");
+
+const fId = document.getElementById("streamer-id");
+const fRealName = document.getElementById("streamer-realName");
+const fSteamUrl = document.getElementById("streamer-steamUrl");
+const fTwitch = document.getElementById("streamer-twitch");
+const fYoutube = document.getElementById("streamer-youtube");
+const fBm = document.getElementById("streamer-battleMetrics");
+
+function openModal(modal) {
+  modal?.classList?.add("is-open");
+  modal?.setAttribute?.("aria-hidden", "false");
+}
+function closeModal(modal) {
+  modal?.classList?.remove("is-open");
+  modal?.setAttribute?.("aria-hidden", "true");
+}
+function setHint(el, text) {
+  if (el) el.textContent = text || "";
+}
+
+async function refreshAdminState() {
+  setAdminUiVisible();
+  await updateAllStreamers(false);
+}
+
+function openStreamerModal(mode, s) {
+  setHint(streamerHint, "");
+
+  if (mode === "new") {
+    streamerTitle && (streamerTitle.textContent = "Новый стример");
+    if (fId) fId.value = "";
+    if (fRealName) fRealName.value = "";
+    if (fSteamUrl) fSteamUrl.value = "";
+    if (fTwitch) fTwitch.value = "";
+    if (fYoutube) fYoutube.value = "";
+    if (fBm) fBm.value = "";
+  } else {
+    streamerTitle && (streamerTitle.textContent = "Редактировать стримера");
+    if (fId) fId.value = (s?.id ?? "");
+    if (fRealName) fRealName.value = (s?.realName ?? "");
+    if (fSteamUrl) fSteamUrl.value = (s?.steamUrl ?? "");
+    if (fTwitch) fTwitch.value = (s?.twitch ?? "");
+    if (fYoutube) fYoutube.value = (s?.youtube ?? "");
+    if (fBm) fBm.value = (s?.battleMetrics ?? "");
+  }
+
+  openModal(streamerModal);
+}
+
+adminFab?.addEventListener?.("click", () => {
+  if (!adminModal) return;
+  if (adminTokenInput) adminTokenInput.value = adminToken || "";
+  setHint(adminHint, "");
+  openModal(adminModal);
+});
+
+adminClose?.addEventListener?.("click", () => closeModal(adminModal));
+adminModal?.querySelector?.(".admin-modal__backdrop")?.addEventListener?.("click", () =>
+  closeModal(adminModal)
+);
+
+streamerClose?.addEventListener?.("click", () => closeModal(streamerModal));
+streamerCancel?.addEventListener?.("click", () => closeModal(streamerModal));
+streamerModal?.querySelector?.(".admin-modal__backdrop")?.addEventListener?.("click", () =>
+  closeModal(streamerModal)
+);
+
+adminSave?.addEventListener?.("click", async () => {
+  adminToken = (adminTokenInput?.value || "").trim();
+  localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
+  setHint(adminHint, "Проверяем токен...");
+  await tryEnableAdmin();
+  setHint(adminHint, adminEnabled ? "✅ Админ-режим включен" : "❌ Неверный токен");
+});
+
+adminClear?.addEventListener?.("click", async () => {
+  adminToken = "";
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
+  adminEnabled = false;
+  if (adminTokenInput) adminTokenInput.value = "";
+  setHint(adminHint, "Очищено");
+  await refreshAdminState();
+});
+
+adminTest?.addEventListener?.("click", async () => {
+  setHint(adminHint, "Проверяем токен...");
+  await tryEnableAdmin();
+  setHint(adminHint, adminEnabled ? "✅ Токен валиден" : "❌ Неверный токен");
+});
+
+newStreamerFab?.addEventListener?.("click", () => {
+  if (!adminEnabled) {
+    showPopup("🔒 Нужен токен");
+    return;
+  }
+  openStreamerModal("new");
+});
+
+streamerSave?.addEventListener?.("click", async () => {
+  try {
+    if (!adminEnabled) {
+      setHint(streamerHint, "🔒 Нужен токен");
+      return;
+    }
+
+    const body = {
+      realName: (fRealName?.value || "").trim(),
+      steamUrl: (fSteamUrl?.value || "").trim(),
+      twitch: (fTwitch?.value || "").trim() || null,
+      youtube: (fYoutube?.value || "").trim() || null,
+      battleMetrics: (fBm?.value || "").trim() || null,
+    };
+
+    if (!body.realName || !body.steamUrl) {
+      setHint(streamerHint, "Нужны минимум Real name и Steam URL");
+      return;
+    }
+
+    const id = (fId?.value || "").trim();
+
+    setHint(streamerHint, "Сохраняем...");
+    if (id) {
+      await adminApi(`/streamers?id=${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+      showPopup("✅ Обновлено");
+    } else {
+      await adminApi(`/streamers`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      showPopup("✅ Добавлено");
+    }
+
+    closeModal(streamerModal);
+    await loadStreamersList();
+    await updateAllStreamers(true);
+  } catch (e) {
+    console.error(e);
+    setHint(streamerHint, "Ошибка: " + (e?.message || "unknown"));
+  }
+});
+
+// =====================
 // UI card
 // =====================
 function createStreamerCard(s, data) {
   const el = document.createElement("div");
   el.className = "streamer";
   el._steamUrl = s.steamUrl;
+  el._id = s.id;
+
+  // admin controls (появятся только в админ-режиме)
+  const adminActions = document.createElement("div");
+  adminActions.className = "admin-card-actions";
+  adminActions.style.display = adminEnabled ? "flex" : "none";
+  adminActions.innerHTML = `
+    <button class="admin-mini" type="button" title="Редактировать" aria-label="Редактировать">✏</button>
+    <button class="admin-mini" type="button" title="Удалить" aria-label="Удалить">🗑</button>
+  `;
+  const btns = adminActions.querySelectorAll("button");
+  const editBtn = btns[0];
+  const delBtn = btns[1];
+
+  editBtn.onclick = () => openStreamerModal("edit", s);
+  delBtn.onclick = async () => {
+    try {
+      if (!adminEnabled) return;
+      if (!s.id) {
+        showPopup("❌ Нет id у записи");
+        return;
+      }
+      if (!confirm(`Удалить "${s.realName}"?`)) return;
+      await adminApi(`/streamers?id=${encodeURIComponent(s.id)}`, { method: "DELETE" });
+      showPopup("✅ Удалено");
+      await loadStreamersList();
+      await updateAllStreamers(true);
+    } catch (e) {
+      console.error(e);
+      showPopup("❌ Ошибка удаления");
+    }
+  };
+
+  el.appendChild(adminActions);
 
   const avatarWrapper = document.createElement("div");
   avatarWrapper.className = "avatar-wrapper";
@@ -562,7 +814,11 @@ async function updateAllStreamers(forceRefresh = false) {
     if (container) container.innerHTML = "";
     const frag = document.createDocumentFragment();
     streamers.forEach((s) => {
-      const card = createStreamerCard(s, { avatar: null, nick: "Загрузка...", steamId: "Загрузка..." });
+      const card = createStreamerCard(s, {
+        avatar: null,
+        nick: "Загрузка...",
+        steamId: "Загрузка...",
+      });
       frag.appendChild(card);
       cards.push({ card, s });
     });
@@ -677,6 +933,11 @@ refreshBtn?.addEventListener?.("click", async () => {
     setLoading(true, "Загружаем список стримеров...");
     await loadStreamersList();
     await updateAllStreamers(true);
+
+    // admin buttons
+    setAdminUiVisible();
+    if (adminToken) await tryEnableAdmin();
+
     startCountdown();
   } catch (e) {
     console.error(e);
