@@ -1,5 +1,5 @@
 console.log(
-  "SCRIPT VERSION: v7 - STREAMERS + ADMIN CRUD + KICK/TIKTOK (ICONS FIX + STATUS FIX)",
+  "SCRIPT VERSION: v8 - STREAMERS + ADMIN CRUD + KICK/TIKTOK via WORKER STATUS (RED/GREEN ONLY)",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -9,6 +9,8 @@ console.log(
 const WORKER_BASE = "https://streamers-proxy.yasonsworkshop.workers.dev";
 const WORKER_PROXY = `${WORKER_BASE}/proxy?url=`;
 const STREAMERS_API = `${WORKER_BASE}/streamers`;
+const STATUS_KICK_API = `${WORKER_BASE}/status/kick?u=`;
+const STATUS_TIKTOK_API = `${WORKER_BASE}/status/tiktok?mode=html&u=`;
 
 // =====================
 // Admin (token + CRUD)
@@ -44,9 +46,7 @@ async function adminApi(path, opts = {}) {
 function setAdminUiVisible() {
   const adminFab = document.getElementById("admin-fab");
   const newFab = document.getElementById("new-streamer-fab");
-  // ⚙ всегда видна (чтобы вставить токен)
   adminFab?.classList?.add("is-visible");
-  // + только когда токен валиден
   newFab?.classList?.toggle?.("is-visible", !!adminEnabled);
 }
 
@@ -120,7 +120,6 @@ const STATUS_CONCURRENCY = 4;
 
 const GREEN = "#00ff5f";
 const RED = "#ff4444";
-const GRAY = "#6f6f6f"; // когда не можем понять (TikTok часто)
 
 // Default avatar
 const DEFAULT_AVATAR =
@@ -231,19 +230,15 @@ function proxied(url) {
 }
 
 /**
- * Всегда проксируем “проблемные” домены (CORS/антибот):
- * - steamcommunity.com
- * - youtube.com
- * - kick.com
- * - tiktok.com
+ * Проксируем домены где CORS/ограничения.
+ * (Kick/TikTok статус теперь берём с воркера /status/*, так что тут они не нужны,
+ * но оставляем steam/youtube.)
  */
 function shouldForceProxy(url) {
   const s = String(url);
   return (
     s.includes("steamcommunity.com") ||
-    s.includes("youtube.com") ||
-    s.includes("kick.com") ||
-    s.includes("tiktok.com")
+    s.includes("youtube.com")
   );
 }
 
@@ -380,7 +375,7 @@ async function getTwitchStatusStrict(username) {
 }
 
 // =====================
-// YouTube (RSS, как было)
+// YouTube (RSS)
 // =====================
 function extractYoutubeChannelIdFromUrl(youtubeUrl) {
   if (!youtubeUrl) return null;
@@ -487,7 +482,7 @@ async function getYoutubeStatusStrict(youtubeUrl) {
 }
 
 // =====================
-// Kick (ВАЖНО: через proxy)
+// Kick (через Worker /status/kick)
 // =====================
 function parseKickUsername(kickUrl) {
   try {
@@ -507,10 +502,10 @@ async function getKickStatusStrict(kickUrl) {
   const cached = getTtl(statusCache, key, STATUS_TTL_MS);
   if (cached !== null) return cached;
 
-  const apiUrl = `https://kick.com/api/v2/channels/${encodeURIComponent(username)}`;
-
-  // kick часто CORS-ит, поэтому забираем через worker proxy гарантированно
-  const text = await fetchTextAnyWayAllowHtml(apiUrl, 15000);
+  const text = await fetchTextAnyWay(
+    `${STATUS_KICK_API}${encodeURIComponent(username)}`,
+    15000
+  );
   if (!text) {
     setTtl(statusCache, key, false);
     return false;
@@ -518,7 +513,7 @@ async function getKickStatusStrict(kickUrl) {
 
   try {
     const data = JSON.parse(text);
-    const online = !!data?.livestream;
+    const online = !!data?.online;
     setTtl(statusCache, key, online);
     return online;
   } catch {
@@ -528,8 +523,7 @@ async function getKickStatusStrict(kickUrl) {
 }
 
 // =====================
-// TikTok (best-effort, НЕ врёт)
-// Возврат: true/false/null (null = не смогли определить)
+// TikTok (через Worker /status/tiktok) - всегда boolean
 // =====================
 function parseTiktokUsername(tiktokUrl) {
   try {
@@ -541,50 +535,32 @@ function parseTiktokUsername(tiktokUrl) {
   }
 }
 
-async function getTiktokStatusBestEffort(tiktokUrl) {
+async function getTiktokStatusStrict(tiktokUrl) {
   const username = parseTiktokUsername(tiktokUrl);
-  if (!username) return null;
+  if (!username) return false;
 
   const key = `tt:${username.toLowerCase()}`;
   const cached = getTtl(statusCache, key, STATUS_TTL_MS);
   if (cached !== null) return cached;
 
-  // TikTok очень часто отдает разные страницы/челленджи/антибот.
-  // Поэтому: если не нашли явный “live”, ставим null (неизвестно), а не false/true.
-  const pageUrl = `https://www.tiktok.com/@${encodeURIComponent(username)}/live`;
-  const html = await fetchTextAnyWayAllowHtml(pageUrl, 15000);
-  if (!html) {
-    setTtl(statusCache, key, null);
-    return null;
-  }
-
-  const s = html.toLowerCase();
-
-  // ЯВНЫЕ маркеры live (могут меняться, но это самые частые)
-  const isOnline =
-    s.includes('"islive":true') ||
-    s.includes('"livestatus":1') ||
-    s.includes('"live":true') ||
-    s.includes('"roomid"') && s.includes('"live"');
-
-  if (isOnline) {
-    setTtl(statusCache, key, true);
-    return true;
-  }
-
-  // Если страница явно говорит “offline”
-  const isOffline =
-    s.includes('"islive":false') ||
-    s.includes('"livestatus":0');
-
-  if (isOffline) {
+  const text = await fetchTextAnyWay(
+    `${STATUS_TIKTOK_API}${encodeURIComponent(username)}`,
+    15000
+  );
+  if (!text) {
     setTtl(statusCache, key, false);
     return false;
   }
 
-  // Иначе: не уверены
-  setTtl(statusCache, key, null);
-  return null;
+  try {
+    const data = JSON.parse(text);
+    const online = !!data?.online;
+    setTtl(statusCache, key, online);
+    return online;
+  } catch {
+    setTtl(statusCache, key, false);
+    return false;
+  }
 }
 
 // =====================
@@ -881,12 +857,9 @@ function createStreamerCard(s, data) {
   return el;
 }
 
-function setIndicator(card, status) {
-  // status: true / false / null
+function setIndicator(card, onlineBool) {
   if (!card._indicatorEl) return;
-  if (status === true) card._indicatorEl.style.background = GREEN;
-  else if (status === false) card._indicatorEl.style.background = RED;
-  else card._indicatorEl.style.background = GRAY; // неизвестно
+  card._indicatorEl.style.background = onlineBool ? GREEN : RED;
 }
 
 // =====================
@@ -1005,11 +978,9 @@ async function updateAllStreamers(forceRefresh = false) {
         }
 
         if (s.tiktok) {
-          const online = await getTiktokStatusBestEffort(s.tiktok); // true/false/null
+          const online = await getTiktokStatusStrict(s.tiktok);
           setIndicator(card, online);
-
-          // если null — считаем как “нет инфо”
-          card._status = (online === true) ? 0 : (online === false ? 1 : 2);
+          card._status = online ? 0 : 1;
           statusDone++;
           return;
         }
@@ -1019,7 +990,7 @@ async function updateAllStreamers(forceRefresh = false) {
     setLoading(true, `Проверяем статусы... ${statusDone}/${total}`);
   }
 
-  // sort online -> offline -> no info
+  // sort online -> offline -> no links
   cardsArray.sort((a, b) => {
     const sa = typeof a._status === "number" ? a._status : 1;
     const sb = typeof b._status === "number" ? b._status : 1;
