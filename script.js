@@ -1,5 +1,5 @@
 console.log(
-  "SCRIPT VERSION: v5 - STREAMERS + ADMIN CRUD (WORKER D1)",
+  "SCRIPT VERSION: v5.1 - STREAMERS + ADMIN CRUD (WORKER D1) + instant admin buttons",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -35,7 +35,9 @@ async function adminApi(path, opts = {}) {
   try {
     data = JSON.parse(text);
   } catch {}
-  if (!res.ok) throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
+  if (!res.ok) {
+    throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
+  }
   return data ?? text;
 }
 
@@ -49,9 +51,17 @@ function setAdminUiVisible() {
   newFab?.classList?.toggle?.("is-visible", !!adminEnabled);
 }
 
+function applyAdminToExistingCards() {
+  const cards = Array.from(container?.children || []);
+  for (const card of cards) {
+    const actions = card.querySelector?.(".admin-card-actions");
+    if (actions) actions.style.display = adminEnabled ? "flex" : "none";
+  }
+}
+
+// Проверяем токен без изменения базы:
+// дергаем DELETE /streamers без id -> пройдет auth -> получим 400 Missing id
 async function tryEnableAdmin() {
-  // Проверяем токен без изменения базы:
-  // дергаем DELETE /streamers без id -> пройдет auth -> получим 400 Missing id
   try {
     await adminApi(`/streamers`, { method: "DELETE" });
     adminEnabled = true;
@@ -61,6 +71,7 @@ async function tryEnableAdmin() {
     else adminEnabled = false;
   }
   setAdminUiVisible();
+  applyAdminToExistingCards();
 }
 
 let streamers = [];
@@ -501,7 +512,7 @@ function setHint(el, text) {
 
 async function refreshAdminState() {
   setAdminUiVisible();
-  await updateAllStreamers(false);
+  applyAdminToExistingCards();
 }
 
 function openStreamerModal(mode, s) {
@@ -552,6 +563,7 @@ adminSave?.addEventListener?.("click", async () => {
   setHint(adminHint, "Проверяем токен...");
   await tryEnableAdmin();
   setHint(adminHint, adminEnabled ? "✅ Админ-режим включен" : "❌ Неверный токен");
+  await refreshAdminState();
 });
 
 adminClear?.addEventListener?.("click", async () => {
@@ -567,6 +579,7 @@ adminTest?.addEventListener?.("click", async () => {
   setHint(adminHint, "Проверяем токен...");
   await tryEnableAdmin();
   setHint(adminHint, adminEnabled ? "✅ Токен валиден" : "❌ Неверный токен");
+  await refreshAdminState();
 });
 
 newStreamerFab?.addEventListener?.("click", () => {
@@ -617,6 +630,7 @@ streamerSave?.addEventListener?.("click", async () => {
     closeModal(streamerModal);
     await loadStreamersList();
     await updateAllStreamers(true);
+    applyAdminToExistingCards();
   } catch (e) {
     console.error(e);
     setHint(streamerHint, "Ошибка: " + (e?.message || "unknown"));
@@ -640,6 +654,7 @@ function createStreamerCard(s, data) {
     <button class="admin-mini" type="button" title="Редактировать" aria-label="Редактировать">✏</button>
     <button class="admin-mini" type="button" title="Удалить" aria-label="Удалить">🗑</button>
   `;
+
   const btns = adminActions.querySelectorAll("button");
   const editBtn = btns[0];
   const delBtn = btns[1];
@@ -657,6 +672,7 @@ function createStreamerCard(s, data) {
       showPopup("✅ Удалено");
       await loadStreamersList();
       await updateAllStreamers(true);
+      applyAdminToExistingCards();
     } catch (e) {
       console.error(e);
       showPopup("❌ Ошибка удаления");
@@ -908,6 +924,9 @@ async function updateAllStreamers(forceRefresh = false) {
   lastUpdateTime = new Date().toLocaleTimeString();
   updateLastUpdateText();
   applySearchFilter();
+
+  // на всякий случай: если админ включен — покажем кнопки и после пересортировки
+  applyAdminToExistingCards();
 }
 
 refreshBtn?.addEventListener?.("click", async () => {
@@ -937,6 +956,7 @@ refreshBtn?.addEventListener?.("click", async () => {
     // admin buttons
     setAdminUiVisible();
     if (adminToken) await tryEnableAdmin();
+    applyAdminToExistingCards();
 
     startCountdown();
   } catch (e) {
