@@ -1,7 +1,5 @@
-console.log("FRONT BUILD ✅", new Date().toISOString(), Math.random());
-
 console.log(
-  "SCRIPT VERSION: v7-noTT - STREAMERS + ADMIN CRUD + KICK (TikTok removed)",
+  "SCRIPT VERSION: v8-noTT - STREAMERS + ADMIN CRUD + KICK (TikTok removed)",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -48,9 +46,7 @@ async function adminApi(path, opts = {}) {
 function setAdminUiVisible() {
   const adminFab = document.getElementById("admin-fab");
   const newFab = document.getElementById("new-streamer-fab");
-  // ⚙ всегда видна (чтобы вставить токен)
   adminFab?.classList?.add("is-visible");
-  // + только когда токен валиден
   newFab?.classList?.toggle?.("is-visible", !!adminEnabled);
 }
 
@@ -96,7 +92,6 @@ async function loadStreamersList() {
       youtube: x.youtube ? String(x.youtube).trim() : undefined,
       battleMetrics: x.battleMetrics ? String(x.battleMetrics).trim() : undefined,
       kick: x.kick ? String(x.kick).trim() : undefined,
-      // tiktok удалили из фронта
     }));
 }
 
@@ -125,7 +120,6 @@ const STATUS_CONCURRENCY = 4;
 const GREEN = "#00ff5f";
 const RED = "#ff4444";
 
-// Default avatar
 const DEFAULT_AVATAR =
   "data:image/svg+xml;base64," +
   btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">
@@ -232,12 +226,6 @@ function proxied(url) {
   return `${WORKER_PROXY}${encodeURIComponent(url)}`;
 }
 
-/**
- * Проксируем “проблемные” домены:
- * - steamcommunity.com
- * - youtube.com
- * - kick.com
- */
 function shouldForceProxy(url) {
   const s = String(url);
   return (
@@ -508,8 +496,8 @@ async function getKickStatusStrict(kickUrl) {
   if (cached !== null) return cached;
 
   const apiUrl = `https://kick.com/api/v2/channels/${encodeURIComponent(username)}`;
-
   const text = await fetchTextAnyWayAllowHtml(apiUrl, 15000);
+
   if (!text) {
     setTtl(statusCache, key, false);
     return false;
@@ -554,8 +542,7 @@ const fTwitch = document.getElementById("streamer-twitch");
 const fYoutube = document.getElementById("streamer-youtube");
 const fBm = document.getElementById("streamer-battleMetrics");
 const fKick = document.getElementById("streamer-kick");
-// const fTiktok удалили
-const fTiktok = document.getElementById("streamer-tiktok"); // можно оставить в форме, но фронт не использует
+const fTiktok = document.getElementById("streamer-tiktok");
 
 function openModal(modal) {
   modal?.classList?.add("is-open");
@@ -581,7 +568,7 @@ function openStreamerModal(mode, s) {
     if (fYoutube) fYoutube.value = "";
     if (fBm) fBm.value = "";
     if (fKick) fKick.value = "";
-    if (fTiktok) fTiktok.value = ""; // чистим поле, но оно не влияет
+    if (fTiktok) fTiktok.value = "";
   } else {
     streamerTitle && (streamerTitle.textContent = "Редактировать стримера");
     if (fId) fId.value = (s?.id ?? "");
@@ -591,7 +578,7 @@ function openStreamerModal(mode, s) {
     if (fYoutube) fYoutube.value = (s?.youtube ?? "");
     if (fBm) fBm.value = (s?.battleMetrics ?? "");
     if (fKick) fKick.value = (s?.kick ?? "");
-    if (fTiktok) fTiktok.value = ""; // не подставляем, чтобы не путаться
+    if (fTiktok) fTiktok.value = "";
   }
 
   openModal(streamerModal);
@@ -655,7 +642,6 @@ streamerSave?.addEventListener?.("click", async () => {
       youtube: (fYoutube?.value || "").trim() || null,
       battleMetrics: (fBm?.value || "").trim() || null,
       kick: (fKick?.value || "").trim() || null,
-      // tiktok оставим в базе как было, но фронт его не использует
       tiktok: (fTiktok?.value || "").trim() || null,
     };
 
@@ -712,7 +698,6 @@ function createStreamerCard(s, data) {
   el._steamUrl = s.steamUrl;
   el._id = s.id;
 
-  // admin controls
   const adminActions = document.createElement("div");
   adminActions.className = "admin-card-actions";
   adminActions.style.display = adminEnabled ? "flex" : "none";
@@ -747,7 +732,6 @@ function createStreamerCard(s, data) {
   img.src = data.avatar || DEFAULT_AVATAR;
   avatarWrapper.appendChild(img);
 
-  // индикатор только если есть twitch/youtube/kick
   if (s.twitch || s.youtube || s.kick) {
     const indicator = document.createElement("span");
     indicator.style.cssText =
@@ -823,7 +807,6 @@ function createStreamerCard(s, data) {
 }
 
 function setIndicator(card, status) {
-  // status: true / false
   if (!card._indicatorEl) return;
   card._indicatorEl.style.background = status ? GREEN : RED;
 }
@@ -922,24 +905,28 @@ async function updateAllStreamers(forceRefresh = false) {
           return;
         }
 
-        // ✅ ИСПРАВЛЕНО: приоритет "онлайн", если онлайн хотя бы на одной платформе.
-        // порядок проверки: twitch -> youtube -> kick (с short-circuit)
-        let online = false;
+        // ✅ ГЛАВНОЕ ИСПРАВЛЕНИЕ:
+        // Проверяем ВСЕ платформы и итоговый статус = online если ХОТЯ БЫ ОДНА true
+        const tasks = [];
 
         if (s.twitch) {
-          const twOnline = await getTwitchStatusStrict(parseTwitchUsername(s.twitch));
-          if (twOnline) online = true;
+          tasks.push(
+            getTwitchStatusStrict(parseTwitchUsername(s.twitch)).catch(() => false)
+          );
+        }
+        if (s.youtube) {
+          tasks.push(
+            getYoutubeStatusStrict(s.youtube).catch(() => false)
+          );
+        }
+        if (s.kick) {
+          tasks.push(
+            getKickStatusStrict(s.kick).catch(() => false)
+          );
         }
 
-        if (!online && s.youtube) {
-          const ytOnline = await getYoutubeStatusStrict(s.youtube);
-          if (ytOnline) online = true;
-        }
-
-        if (!online && s.kick) {
-          const kOnline = await getKickStatusStrict(s.kick);
-          if (kOnline) online = true;
-        }
+        const results = await Promise.all(tasks);
+        const online = results.some(Boolean);
 
         setIndicator(card, online);
         card._status = online ? 0 : 1;
