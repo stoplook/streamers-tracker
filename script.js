@@ -44,12 +44,16 @@ const container = document.getElementById('streamers-container');
 const refreshBtn = document.getElementById('refresh-btn');
 const searchInput = document.getElementById('search-input');
 
-refreshBtn.textContent = 'Обновить данные';
+if (refreshBtn) refreshBtn.textContent = 'Обновить данные';
 
+// =====================
 // Settings
-const STEAM_TTL_MS = 5 * 60 * 1000;   // 5 минут
-const STATUS_TTL_MS = 60 * 1000;      // 1 минута
-const YT_CHANNEL_TTL_MS = 12 * 60 * 60 * 1000; // 12 часов (channelId почти не меняется)
+// =====================
+const WORKER_PROXY = "https://streamers-proxy.yasonsworkshop.workers.dev/proxy?url=";
+
+const STEAM_TTL_MS = 5 * 60 * 1000;           // 5 минут
+const STATUS_TTL_MS = 60 * 1000;              // 1 минута
+const YT_CHANNEL_TTL_MS = 12 * 60 * 60 * 1000;// 12 часов
 const FETCH_TIMEOUT_MS = 15000;
 const STEAM_CONCURRENCY = 3;
 const STATUS_CONCURRENCY = 4;
@@ -64,10 +68,15 @@ const DEFAULT_AVATAR = 'data:image/svg+xml;base64,' +
   <text x="50%" y="50%" font-size="16" fill="#66b2ff" font-family="Inter, sans-serif" font-weight="600" text-anchor="middle" dominant-baseline="central">?</text>
 </svg>`);
 
-// Popup
-const popupContainer = document.createElement('div');
-popupContainer.className = 'popup-container';
-document.body.appendChild(popupContainer);
+// =====================
+// Popup (используем контейнер из HTML, если он есть)
+// =====================
+const popupContainer = document.querySelector('.popup-container') || (() => {
+  const el = document.createElement('div');
+  el.className = 'popup-container';
+  document.body.appendChild(el);
+  return el;
+})();
 
 function showPopup(message) {
   const popup = document.createElement('div');
@@ -77,18 +86,23 @@ function showPopup(message) {
   setTimeout(() => popup.remove(), 1500);
 }
 
+// =====================
 // Search
-searchInput.addEventListener('input', () => {
-  const term = (searchInput.value || '').toLowerCase();
-  container.querySelectorAll('.streamer').forEach(card => {
+// =====================
+function applySearchFilter() {
+  const term = (searchInput?.value || '').toLowerCase();
+  container?.querySelectorAll?.('.streamer')?.forEach(card => {
     const steamNick = (card._steamNickEl?.textContent || '').toLowerCase();
-    const realName = (card.querySelector('.streamer-name')?.textContent || '').toLowerCase();
+    const realName = (card.querySelector?.('.streamer-name')?.textContent || '').toLowerCase();
     const steamId = (card._steamIdEl?.textContent || '').toLowerCase();
     card.style.display = (steamNick.includes(term) || realName.includes(term) || steamId.includes(term)) ? '' : 'none';
   });
-});
+}
+searchInput?.addEventListener?.('input', applySearchFilter);
 
-// ===== Loader text (2 этапа) =====
+// =====================
+// Loader
+// =====================
 function setLoading(on, text) {
   if (loader) loader.style.display = on ? 'block' : 'none';
   if (loaderOverlay) loaderOverlay.style.display = on ? 'block' : 'none';
@@ -96,53 +110,59 @@ function setLoading(on, text) {
   if (lt) lt.textContent = on ? (text || '') : '';
 }
 
-// fetch with hard timeout
+// =====================
+// fetch with hard timeout (fixed timers)
+// =====================
 async function fetchText(url, timeout = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
+  let timer = null;
 
   const timeoutPromise = new Promise(resolve => {
-    const t = setTimeout(() => {
+    timer = setTimeout(() => {
       try { controller.abort(); } catch {}
       resolve(null);
-      clearTimeout(t);
     }, timeout);
   });
 
   try {
-    const fetchPromise = fetch(url, { signal: controller.signal })
+    const fetchPromise = fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "Accept": "*/*"
+      }
+    })
       .then(r => (r && r.ok) ? r.text() : null)
       .catch(() => null);
 
     return await Promise.race([fetchPromise, timeoutPromise]);
-  } catch {
-    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
-// proxies
+// =====================
+// Proxies (теперь через твой Worker)
+// =====================
 function proxyUrls(targetUrl) {
   return [
-    `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(targetUrl)}`,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-    `https://api.allorigins.helix.team/raw?url=${encodeURIComponent(targetUrl)}`
+    `${WORKER_PROXY}${encodeURIComponent(targetUrl)}`
   ];
 }
 
 async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
+  // direct обычно будет блокироваться CORS — но оставим на всякий
   const direct = await fetchText(url, timeout);
   if (direct) return direct;
 
   for (const p of proxyUrls(url)) {
     const t = await fetchText(p, timeout);
+    // для Steam/XML и decapi нам HTML не нужен
     if (t && !t.includes('<!DOCTYPE html') && !t.includes('<html')) return t;
-    // для YouTube иногда нужно именно HTML — поэтому НЕ режем его тут глобально,
-    // но в старом коде у тебя было отсеивание HTML. Мы оставим это поведение
-    // только для общих прокси-ответов, а для YouTube-HTML будем запрашивать отдельной функцией.
   }
   return null;
 }
 
-// специальный “достань что угодно, включая HTML” (нужно для YouTube handle -> channelId)
+// “достань что угодно, включая HTML” (нужно для YouTube handle -> channelId)
 async function fetchTextAnyWayAllowHtml(url, timeout = FETCH_TIMEOUT_MS) {
   const direct = await fetchText(url, timeout);
   if (direct) return direct;
@@ -154,7 +174,9 @@ async function fetchTextAnyWayAllowHtml(url, timeout = FETCH_TIMEOUT_MS) {
   return null;
 }
 
+// =====================
 // TTL caches
+// =====================
 const steamCache = new Map();
 const statusCache = new Map();
 const ytChannelCache = new Map(); // youtubeUrl/handle -> channelId
@@ -169,7 +191,9 @@ function setTtl(cache, key, value) {
   cache.set(key, { value, ts: Date.now() });
 }
 
+// =====================
 // Steam
+// =====================
 function makeSteamXmlUrl(profileUrl) {
   const base = profileUrl.endsWith('/') ? profileUrl : (profileUrl + '/');
   return `${base}?xml=1&cacheBust=${Date.now()}`;
@@ -206,7 +230,9 @@ async function fetchSteamProfileWithRetry(steamUrl, maxAttempts = 4, delay = 110
   return { avatar: null, nick: null, steamId: null };
 }
 
+// =====================
 // Twitch parsing
+// =====================
 function parseTwitchUsername(twitchUrl) {
   try {
     const u = new URL(twitchUrl);
@@ -260,20 +286,15 @@ async function getTwitchStatusStrict(username) {
 }
 
 // =====================
-// YouTube (front-only, но уже НЕ “всегда false”)
-// 1) Пытаемся получить channelId из ссылки (channel/UC..., @handle, /@handle)
-// 2) Проверяем RSS канала: /feeds/videos.xml?channel_id=...
+// YouTube (front-only)
 // =====================
-
 function extractYoutubeChannelIdFromUrl(youtubeUrl) {
   if (!youtubeUrl) return null;
   const s = String(youtubeUrl);
 
-  // .../channel/UCxxxx
   const m1 = s.match(/youtube\.com\/channel\/(UC[a-zA-Z0-9_-]{18,})/i);
   if (m1) return m1[1];
 
-  // иногда встречается channelId=UC...
   const m2 = s.match(/channel_id=(UC[a-zA-Z0-9_-]{18,})/i);
   if (m2) return m2[1];
 
@@ -284,15 +305,12 @@ function extractYoutubeHandleFromUrl(youtubeUrl) {
   if (!youtubeUrl) return null;
   const s = String(youtubeUrl);
 
-  // youtube.com/@handle или youtu.be/@handle (редко), или www.youtube.com/@handle/...
   const m = s.match(/youtube\.com\/@([^/?#]+)/i);
   if (m) return m[1];
 
-  // youtube.com/c/ (старые кастомные) — там без API часто никак, но попробуем как "handle"
   const mc = s.match(/youtube\.com\/c\/([^/?#]+)/i);
   if (mc) return mc[1];
 
-  // youtube.com/user/ (старые) — аналогично
   const mu = s.match(/youtube\.com\/user\/([^/?#]+)/i);
   if (mu) return mu[1];
 
@@ -307,15 +325,9 @@ function detectLiveFromRss(rssText) {
   if (!rssText) return false;
   const s = rssText.toLowerCase();
 
-  // Часто YouTube ставит такие маркеры:
-  // <yt:liveBroadcastContent>live</yt:liveBroadcastContent>
   if (s.includes('yt:livebroadcastcontent') && s.includes('>live<')) return true;
-
-  // Иногда встречается isLiveContent:true (в редких вариантах/встроенных данных)
   if (s.includes('"islivecontent":true')) return true;
 
-  // Фоллбек: в некоторых RSS заголовках/описаниях присутствует "live"
-  // (не идеальный, но лучше чем всегда false)
   const hasEntry = s.includes('<entry');
   if (hasEntry && s.includes('live')) return true;
 
@@ -325,15 +337,12 @@ function detectLiveFromRss(rssText) {
 function extractChannelIdFromYoutubeHtml(html) {
   if (!html) return null;
 
-  // 1) "channelId":"UC...."
   let m = html.match(/"channelId"\s*:\s*"(UC[a-zA-Z0-9_-]{18,})"/);
   if (m) return m[1];
 
-  // 2) canonical /channel/UC....
   m = html.match(/\/channel\/(UC[a-zA-Z0-9_-]{18,})/);
   if (m) return m[1];
 
-  // 3) externalId":"UC...."
   m = html.match(/"externalId"\s*:\s*"(UC[a-zA-Z0-9_-]{18,})"/);
   if (m) return m[1];
 
@@ -346,21 +355,18 @@ async function resolveYoutubeChannelId(youtubeUrl) {
   const cached = getTtl(ytChannelCache, youtubeUrl, YT_CHANNEL_TTL_MS);
   if (cached !== null) return cached;
 
-  // Если уже channel/UC...
   const directId = extractYoutubeChannelIdFromUrl(youtubeUrl);
   if (directId) {
     setTtl(ytChannelCache, youtubeUrl, directId);
     return directId;
   }
 
-  // Пробуем handle
   const handle = extractYoutubeHandleFromUrl(youtubeUrl);
   if (!handle) {
     setTtl(ytChannelCache, youtubeUrl, null);
     return null;
   }
 
-  // Открываем страницу канала по handle и пытаемся вытащить channelId
   const pageUrl = `https://www.youtube.com/@${encodeURIComponent(handle)}`;
   const html = await fetchTextAnyWayAllowHtml(pageUrl, 20000);
   const id = extractChannelIdFromYoutubeHtml(html);
@@ -376,14 +382,12 @@ async function getYoutubeStatusStrict(youtubeUrl) {
   const cached = getTtl(statusCache, key, STATUS_TTL_MS);
   if (cached !== null) return cached;
 
-  // 1) получаем channelId
   const channelId = await resolveYoutubeChannelId(youtubeUrl);
   if (!channelId) {
     setTtl(statusCache, key, false);
     return false;
   }
 
-  // 2) тянем RSS канала (через прокси тоже ок)
   const rss = await fetchTextAnyWayAllowHtml(ytRssUrl(channelId), 18000);
   const online = detectLiveFromRss(rss);
 
@@ -391,7 +395,9 @@ async function getYoutubeStatusStrict(youtubeUrl) {
   return online;
 }
 
+// =====================
 // UI card
+// =====================
 function createStreamerCard(s, data) {
   const el = document.createElement('div');
   el.className = 'streamer';
@@ -433,9 +439,18 @@ function createStreamerCard(s, data) {
   el._steamNickEl = infoWrapper.querySelector('.steam-nick');
   el._steamIdEl = infoWrapper.querySelector('.steam-id');
 
-  el._steamIdEl.addEventListener('click', () => {
-    navigator.clipboard.writeText(el._steamIdEl.textContent);
-    showPopup('✅ Скопировано!');
+  el._steamIdEl?.addEventListener?.('click', async () => {
+    const text = el._steamIdEl?.textContent || '';
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        showPopup('✅ Скопировано!');
+      } else {
+        showPopup('❌ Clipboard недоступен');
+      }
+    } catch {
+      showPopup('❌ Не удалось скопировать');
+    }
   });
 
   el.appendChild(infoWrapper);
@@ -446,6 +461,7 @@ function createStreamerCard(s, data) {
   const steamBtn = document.createElement('a');
   steamBtn.href = s.steamUrl;
   steamBtn.target = '_blank';
+  steamBtn.rel = 'noopener noreferrer';
   steamBtn.className = 'primary-btn';
   steamBtn.innerHTML = `<img src="https://img.icons8.com/ios-filled/50/66b2ff/steam.png" alt="steam"/>Открыть профиль`;
   buttonsWrapper.appendChild(steamBtn);
@@ -457,6 +473,7 @@ function createStreamerCard(s, data) {
     const bm = document.createElement('a');
     bm.href = s.battleMetrics;
     bm.target = '_blank';
+    bm.rel = 'noopener noreferrer';
     bm.className = 'bm-btn';
     bm.textContent = "BattleMetrics";
     iconGroup.appendChild(bm);
@@ -465,6 +482,7 @@ function createStreamerCard(s, data) {
     const tw = document.createElement('a');
     tw.href = s.twitch;
     tw.target = '_blank';
+    tw.rel = 'noopener noreferrer';
     tw.className = 'icon-btn';
     tw.innerHTML = `<img src="https://img.icons8.com/ios-glyphs/30/66b2ff/twitch.png" alt="twitch"/>`;
     iconGroup.appendChild(tw);
@@ -473,6 +491,7 @@ function createStreamerCard(s, data) {
     const yt = document.createElement('a');
     yt.href = s.youtube;
     yt.target = '_blank';
+    yt.rel = 'noopener noreferrer';
     yt.className = 'icon-btn';
     yt.innerHTML = `<img src="https://img.icons8.com/ios-filled/30/66b2ff/youtube-play.png" alt="youtube"/>`;
     iconGroup.appendChild(yt);
@@ -489,11 +508,14 @@ function setIndicatorStrict(card, online) {
   card._indicatorEl.style.background = online ? GREEN : RED;
 }
 
+// =====================
 // Countdown
+// =====================
 let countdown = 300;
 let lastUpdateTime = null;
 
 function updateLastUpdateText() {
+  if (!lastUpdateEl) return;
   lastUpdateEl.textContent = lastUpdateTime
     ? `Последнее обновление: ${lastUpdateTime} | Автообновление через: ${countdown}s`
     : `Автообновление через: ${countdown}s`;
@@ -511,28 +533,29 @@ function startCountdown() {
   }, 1000);
 }
 
+// =====================
 // MAIN
+// =====================
 async function updateAllStreamers(forceRefresh = false) {
   const total = streamers.length;
 
-  // Stage 1
   setLoading(true, `Подтягиваем данные Steam… 0/${total}`);
 
   const cards = [];
-  if (!forceRefresh && container.children.length > 0) {
+  if (!forceRefresh && container && container.children.length > 0) {
     Array.from(container.children).forEach(card => {
       const s = streamers.find(st => st.steamUrl === card._steamUrl);
       if (s) cards.push({ card, s });
     });
   } else {
-    container.innerHTML = '';
+    if (container) container.innerHTML = '';
     const frag = document.createDocumentFragment();
     streamers.forEach(s => {
       const card = createStreamerCard(s, { avatar: null, nick: 'Загрузка...', steamId: 'Загрузка...' });
       frag.appendChild(card);
       cards.push({ card, s });
     });
-    container.appendChild(frag);
+    container?.appendChild?.(frag);
   }
 
   let steamDone = 0;
@@ -540,8 +563,8 @@ async function updateAllStreamers(forceRefresh = false) {
     const chunk = cards.slice(i, i + STEAM_CONCURRENCY);
     await Promise.all(chunk.map(async ({ card, s }) => {
       const data = await fetchSteamProfileWithRetry(s.steamUrl);
-      const avatarWrapper = card.querySelector('.avatar-wrapper');
-      const img = avatarWrapper?.querySelector('img');
+      const avatarWrapper = card.querySelector?.('.avatar-wrapper');
+      const img = avatarWrapper?.querySelector?.('img');
       if (img) img.src = data.avatar || DEFAULT_AVATAR;
       if (card._steamNickEl) card._steamNickEl.textContent = data.nick || 'Не доступен';
       if (card._steamIdEl) card._steamIdEl.textContent = data.steamId || 'Не найден';
@@ -550,10 +573,9 @@ async function updateAllStreamers(forceRefresh = false) {
     setLoading(true, `Подтягиваем данные Steam… ${steamDone}/${total}`);
   }
 
-  // Stage 2
   setLoading(true, `Проверяем статусы стримов... 0/${total}`);
 
-  const cardsArray = Array.from(container.children);
+  const cardsArray = Array.from(container?.children || []);
 
   const HARD_LIMIT_MS = 90000;
   const started = Date.now();
@@ -583,7 +605,6 @@ async function updateAllStreamers(forceRefresh = false) {
       }
 
       if (s.youtube) {
-        // ✅ ВАЖНО: теперь проверяем конкретный канал по ссылке
         const online = await getYoutubeStatusStrict(s.youtube);
         setIndicatorStrict(card, online);
         card._status = online ? 0 : 1;
@@ -592,10 +613,9 @@ async function updateAllStreamers(forceRefresh = false) {
       }
     }));
 
-    setLoading(true, `Проверяем статусы стримов. ${statusDone}/${total}`);
+    setLoading(true, `Проверяем статусы стримов... ${statusDone}/${total}`);
   }
 
-  // Sort: online -> offline -> no info
   cardsArray.sort((a, b) => {
     const sa = (typeof a._status === 'number') ? a._status : 1;
     const sb = (typeof b._status === 'number') ? b._status : 1;
@@ -607,16 +627,21 @@ async function updateAllStreamers(forceRefresh = false) {
 
   const frag = document.createDocumentFragment();
   cardsArray.forEach(card => frag.appendChild(card));
-  container.innerHTML = '';
-  container.appendChild(frag);
+  if (container) {
+    container.innerHTML = '';
+    container.appendChild(frag);
+  }
 
   setLoading(false);
 
   lastUpdateTime = new Date().toLocaleTimeString();
   updateLastUpdateText();
+
+  // Если пользователь уже что-то ввёл — применим фильтр снова
+  applySearchFilter();
 }
 
-refreshBtn.addEventListener('click', () => {
+refreshBtn?.addEventListener?.('click', () => {
   steamCache.clear();
   statusCache.clear();
   ytChannelCache.clear();
