@@ -36,7 +36,9 @@ async function adminApi(path, opts = {}) {
     data = JSON.parse(text);
   } catch {}
   if (!res.ok) {
-    throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
+    throw new Error(
+      data && data.error ? data.error : text || "HTTP " + res.status
+    );
   }
   return data ?? text;
 }
@@ -866,7 +868,11 @@ async function updateAllStreamers(forceRefresh = false) {
     if (container) container.innerHTML = "";
     const frag = document.createDocumentFragment();
     streamers.forEach((s) => {
-      const card = createStreamerCard(s, { avatar: null, nick: "Загрузка...", steamId: "Загрузка..." });
+      const card = createStreamerCard(s, {
+        avatar: null,
+        nick: "Загрузка...",
+        steamId: "Загрузка...",
+      });
       frag.appendChild(card);
       cards.push({ card, s });
     });
@@ -914,30 +920,29 @@ async function updateAllStreamers(forceRefresh = false) {
           return;
         }
 
-        // приоритет: twitch -> youtube -> kick
+        // ✅ ИСПРАВЛЕНО: приоритет "онлайн", если онлайн хотя бы на одной платформе.
+        // порядок проверки: twitch -> youtube -> kick (с short-circuit)
+        let online = false;
+
         if (s.twitch) {
-          const online = await getTwitchStatusStrict(parseTwitchUsername(s.twitch));
-          setIndicator(card, online);
-          card._status = online ? 0 : 1;
-          statusDone++;
-          return;
+          const twOnline = await getTwitchStatusStrict(parseTwitchUsername(s.twitch));
+          if (twOnline) online = true;
         }
 
-        if (s.youtube) {
-          const online = await getYoutubeStatusStrict(s.youtube);
-          setIndicator(card, online);
-          card._status = online ? 0 : 1;
-          statusDone++;
-          return;
+        if (!online && s.youtube) {
+          const ytOnline = await getYoutubeStatusStrict(s.youtube);
+          if (ytOnline) online = true;
         }
 
-        if (s.kick) {
-          const online = await getKickStatusStrict(s.kick);
-          setIndicator(card, online);
-          card._status = online ? 0 : 1;
-          statusDone++;
-          return;
+        if (!online && s.kick) {
+          const kOnline = await getKickStatusStrict(s.kick);
+          if (kOnline) online = true;
         }
+
+        setIndicator(card, online);
+        card._status = online ? 0 : 1;
+        statusDone++;
+        return;
       })
     );
 
