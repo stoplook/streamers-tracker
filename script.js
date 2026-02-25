@@ -1,5 +1,5 @@
 console.log(
-  "SCRIPT VERSION: v7 - STREAMERS + ADMIN CRUD + KICK/TIKTOK + ICONS + BETTER TIKTOK LIVE",
+  "SCRIPT VERSION: v8 - FIX ICONS (NO SVG PATH), RESTORE KICK STATUS, STRICTER TIKTOK",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
 
@@ -40,7 +40,7 @@ async function adminApi(path, opts = {}) {
 function setAdminUiVisible() {
   const adminFab = document.getElementById("admin-fab");
   const newFab = document.getElementById("new-streamer-fab");
-  // ⚙ всегда видна (чтобы можно было вставить токен)
+  // ⚙ всегда видна
   adminFab?.classList?.add("is-visible");
   // + только когда токен валиден
   newFab?.classList?.toggle?.("is-visible", !!adminEnabled);
@@ -56,7 +56,6 @@ function applyAdminToExistingCards() {
 
 async function tryEnableAdmin() {
   try {
-    // Нужен эндпоинт в worker.js: GET /admin/ping -> {ok:true} с проверкой токена
     await adminApi(`/admin/ping`, { method: "GET" });
     adminEnabled = true;
   } catch {
@@ -67,14 +66,12 @@ async function tryEnableAdmin() {
 }
 
 // =====================
-// Data
+// Streamers list
 // =====================
 let streamers = [];
 
-// грузим список стримеров из WORKER API (без кеша)
 async function loadStreamersList() {
   const url = `${STREAMERS_API}?v=${Date.now()}`;
-
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Не удалось загрузить /streamers: ${res.status}`);
 
@@ -208,28 +205,20 @@ function proxied(url) {
   return `${WORKER_PROXY}${encodeURIComponent(url)}`;
 }
 
+/*
+  fetchTextAnyWay:
+   - steamcommunity.com, youtube.com, tiktok.com -> через proxy (CORS/anti-bot)
+   - остальные -> direct, если нет -> proxy
+*/
 async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
   try {
     const s = String(url);
-    const mustProxy = s.includes("steamcommunity.com") || s.includes("youtube.com") || s.includes("tiktok.com");
+    const forceProxy =
+      s.includes("steamcommunity.com") ||
+      s.includes("youtube.com") ||
+      s.includes("tiktok.com");
 
-    if (mustProxy) return await fetchText(proxied(url), timeout);
-
-    const direct = await fetchText(url, timeout);
-    if (direct) return direct;
-
-    const t = await fetchText(proxied(url), timeout);
-    if (t && !t.includes("<!DOCTYPE html") && !t.includes("<html")) return t;
-  } catch {}
-  return null;
-}
-
-async function fetchTextAnyWayAllowHtml(url, timeout = FETCH_TIMEOUT_MS) {
-  try {
-    const s = String(url);
-    const mustProxy = s.includes("steamcommunity.com") || s.includes("youtube.com") || s.includes("tiktok.com");
-
-    if (mustProxy) return await fetchText(proxied(url), timeout);
+    if (forceProxy) return await fetchText(proxied(url), timeout);
 
     const direct = await fetchText(url, timeout);
     if (direct) return direct;
@@ -237,6 +226,11 @@ async function fetchTextAnyWayAllowHtml(url, timeout = FETCH_TIMEOUT_MS) {
     return await fetchText(proxied(url), timeout);
   } catch {}
   return null;
+}
+
+async function fetchTextAnyWayAllowHtml(url, timeout = FETCH_TIMEOUT_MS) {
+  // для TikTok/YouTube нам нужно принять HTML (не отбрасываем)
+  return await fetchTextAnyWay(url, timeout);
 }
 
 // =====================
@@ -347,7 +341,7 @@ async function getTwitchStatusStrict(username) {
 }
 
 // =====================
-// YouTube
+// YouTube (как было)
 // =====================
 function extractYoutubeChannelIdFromUrl(youtubeUrl) {
   if (!youtubeUrl) return null;
@@ -454,7 +448,7 @@ async function getYoutubeStatusStrict(youtubeUrl) {
 }
 
 // =====================
-// Kick
+// Kick (ВОЗВРАЩАЕМ как работало)
 // =====================
 function parseKickUsername(kickUrl) {
   try {
@@ -493,7 +487,7 @@ async function getKickStatusStrict(kickUrl) {
 }
 
 // =====================
-// TikTok (stricter best-effort)
+// TikTok (строже, меньше ложных online)
 // =====================
 function parseTiktokUsername(tiktokUrl) {
   try {
@@ -505,6 +499,18 @@ function parseTiktokUsername(tiktokUrl) {
   }
 }
 
+function looksLikeTiktokBotPage(htmlLower) {
+  return (
+    htmlLower.includes("verify you are human") ||
+    htmlLower.includes("captcha") ||
+    htmlLower.includes("access denied") ||
+    htmlLower.includes("not now") && htmlLower.includes("tiktok") && htmlLower.includes("browser") ||
+    htmlLower.includes("enable javascript") ||
+    htmlLower.includes("suspicious") ||
+    htmlLower.includes("blocked")
+  );
+}
+
 async function getTiktokStatusStrict(tiktokUrl) {
   const username = parseTiktokUsername(tiktokUrl);
   if (!username) return false;
@@ -513,92 +519,35 @@ async function getTiktokStatusStrict(tiktokUrl) {
   const cached = getTtl(statusCache, key, STATUS_TTL_MS);
   if (cached !== null) return cached;
 
+  // /live страница часто защищена, но пробуем
   const pageUrl = `https://www.tiktok.com/@${encodeURIComponent(username)}/live`;
-  const html = await fetchTextAnyWayAllowHtml(pageUrl, 18000);
-
+  const html = await fetchTextAnyWayAllowHtml(pageUrl, 15000);
   if (!html) {
     setTtl(statusCache, key, false);
     return false;
   }
 
   const s = html.toLowerCase();
-
-  // явные оффлайн сигналы
-  const offlineSignals = [
-    "islive\":false",
-    "liveRoomStatus\":0",
-    "live_room_status\":0",
-    "this live has ended",
-    "live has ended",
-    "currently not live",
-    "no live videos",
-  ];
-  if (offlineSignals.some(x => s.includes(x.toLowerCase()))) {
+  if (looksLikeTiktokBotPage(s)) {
+    // лучше "ложный оффлайн", чем "ложный онлайн"
     setTtl(statusCache, key, false);
     return false;
   }
 
-  // онлайновые сигналы: roomId + isLive true / status 1
-  const hasRoomId =
-    /"roomid"\s*:\s*"\d+"/i.test(html) ||
-    /"roomId"\s*:\s*"\d+"/i.test(html) ||
-    /"room_id"\s*:\s*"\d+"/i.test(html);
-
-  const isLiveTrue =
-    /"isLive"\s*:\s*true/i.test(html) ||
-    /"islive"\s*:\s*true/i.test(html) ||
-    /"liveRoomStatus"\s*:\s*1/i.test(html) ||
-    /"live_room_status"\s*:\s*1/i.test(html);
-
-  const online = hasRoomId && isLiveTrue;
+  // Строгие признаки live в данных страницы
+  const online =
+    s.includes('"islive":true') ||
+    s.includes('"liveRoomId"'.toLowerCase()) ||
+    s.includes('"livestatus":1') ||
+    s.includes('"status":2') && s.includes("livestream") ||
+    s.includes('"room_id"') && s.includes('"live"');
 
   setTtl(statusCache, key, online);
   return online;
 }
 
 // =====================
-// Icons (inline SVG, no external 404)
-// =====================
-function svgIcon(name) {
-  const icons = {
-    twitch: `
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path fill="currentColor" d="M4 2h18v12l-5 5h-4l-2 2H8v-2H4V2zm2 2v13h3v2.5L11.5 17H17l3-3V4H6zm7 3h2v6h-2V7zm-4 0h2v6H9V7z"/>
-      </svg>`,
-    youtube: `
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path fill="currentColor" d="M23 12s0-3.4-.4-5c-.2-.9-.9-1.6-1.8-1.8C19.2 5 12 5s-7.2 0-8.8.2c-.9.2-1.6.9-1.8 1.8C1 8.6 1 12 1 12s0 3.4.4 5c.2.9.9 1.6 1.8 1.8C4.8 19 12 19s7.2 0 8.8-.2c.9-.2 1.6-.9 1.8-1.8.4-1.6.4-5 .4-5zM10 15.2V8.8L16 12l-6 3.2z"/>
-      </svg>`,
-    kick: `
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path fill="currentColor" d="M4 3h10v3H9v4h5v3H9v5H6V3H4v18h3v-2h2v2h3v-3h-3v-5h5v-3h-5V6h5V3H4z"/>
-      </svg>`,
-    tiktok: `
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path fill="currentColor" d="M14 3v10.2a3.8 3.8 0 1 1-3-3.7V6.2a7.2 7.2 0 1 0 6 7.1V8.5c1.2.9 2.7 1.4 4 1.5V6.7c-1.4-.2-3.6-1.1-4-3.7H14z"/>
-      </svg>`,
-    steam: `
-      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-        <path fill="currentColor" d="M16.7 2a5.3 5.3 0 0 0-5.2 4.4l-3.3 2.4c-.4-.2-.8-.3-1.3-.3A3.9 3.9 0 0 0 3 12.4l2.4 1a3.1 3.1 0 0 0 3 2.6 3.2 3.2 0 0 0 3.2-3.2c0-.1 0-.3 0-.4l2.5-3.2h.6A5.3 5.3 0 0 0 16.7 2zm0 1.8a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zM6.1 10.4c.3 0 .7.1 1 .2l2.3 1a2 2 0 0 1-1 3.7c-.8 0-1.5-.5-1.8-1.2l1.2.5c.9.4 1.9 0 2.3-.9.4-.9 0-1.9-.9-2.3l-1.9-.8c.2-.1.5-.2.8-.2zm10.6-4.7a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4z"/>
-      </svg>`,
-  };
-  return icons[name] || "";
-}
-
-function makeIconBtn(kind, href, title) {
-  const a = document.createElement("a");
-  a.href = href;
-  a.target = "_blank";
-  a.rel = "noopener noreferrer";
-  a.className = "icon-btn";
-  a.title = title || kind;
-  a.setAttribute("aria-label", title || kind);
-  a.innerHTML = svgIcon(kind);
-  return a;
-}
-
-// =====================
-// Admin modals wiring (requires index.html admin blocks)
+// Admin modals wiring
 // =====================
 const adminFab = document.getElementById("admin-fab");
 const newStreamerFab = document.getElementById("new-streamer-fab");
@@ -760,6 +709,51 @@ streamerSave?.addEventListener?.("click", async () => {
 });
 
 // =====================
+// Icon buttons (NO SVG PATH)
+// =====================
+function makeImgIcon(src, alt) {
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = alt || "";
+  img.width = 18;
+  img.height = 18;
+  img.loading = "lazy";
+  return img;
+}
+
+function makeLetterIcon(letter) {
+  // svg только с текстом (без path) => не будет ошибки <path d>
+  const svg = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+    <rect width="18" height="18" rx="4" ry="4" fill="none"/>
+    <text x="50%" y="52%" text-anchor="middle" dominant-baseline="middle"
+      font-family="Inter, Arial, sans-serif" font-size="10" font-weight="700" fill="#66b2ff">${letter}</text>
+  </svg>`;
+  const img = document.createElement("img");
+  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  img.alt = letter;
+  img.width = 18;
+  img.height = 18;
+  return img;
+}
+
+function makeIconBtn(href, kind) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.className = "icon-btn";
+
+  if (kind === "twitch") a.appendChild(makeImgIcon("https://img.icons8.com/ios-glyphs/30/66b2ff/twitch.png", "twitch"));
+  else if (kind === "youtube") a.appendChild(makeImgIcon("https://img.icons8.com/ios-filled/30/66b2ff/youtube-play.png", "youtube"));
+  else if (kind === "kick") a.appendChild(makeLetterIcon("K"));
+  else if (kind === "tiktok") a.appendChild(makeLetterIcon("TT"));
+  else a.appendChild(makeLetterIcon("?"));
+
+  return a;
+}
+
+// =====================
 // UI card
 // =====================
 function createStreamerCard(s, data) {
@@ -768,7 +762,7 @@ function createStreamerCard(s, data) {
   el._steamUrl = s.steamUrl;
   el._id = s.id;
 
-  // admin buttons
+  // admin mini
   const adminActions = document.createElement("div");
   adminActions.className = "admin-card-actions";
   adminActions.style.display = adminEnabled ? "flex" : "none";
@@ -797,7 +791,7 @@ function createStreamerCard(s, data) {
 
   el.appendChild(adminActions);
 
-  // avatar + indicator
+  // avatar
   const avatarWrapper = document.createElement("div");
   avatarWrapper.className = "avatar-wrapper";
   avatarWrapper.style.position = "relative";
@@ -856,7 +850,7 @@ function createStreamerCard(s, data) {
   steamBtn.target = "_blank";
   steamBtn.rel = "noopener noreferrer";
   steamBtn.className = "primary-btn";
-  steamBtn.innerHTML = `${svgIcon("steam")}Открыть профиль`;
+  steamBtn.innerHTML = `<img src="https://img.icons8.com/ios-filled/50/66b2ff/steam.png" alt="steam"/>Открыть профиль`;
   buttonsWrapper.appendChild(steamBtn);
 
   const iconGroup = document.createElement("div");
@@ -872,10 +866,10 @@ function createStreamerCard(s, data) {
     iconGroup.appendChild(bm);
   }
 
-  if (s.twitch) iconGroup.appendChild(makeIconBtn("twitch", s.twitch, "Twitch"));
-  if (s.youtube) iconGroup.appendChild(makeIconBtn("youtube", s.youtube, "YouTube"));
-  if (s.kick) iconGroup.appendChild(makeIconBtn("kick", s.kick, "Kick"));
-  if (s.tiktok) iconGroup.appendChild(makeIconBtn("tiktok", s.tiktok, "TikTok"));
+  if (s.twitch) iconGroup.appendChild(makeIconBtn(s.twitch, "twitch"));
+  if (s.youtube) iconGroup.appendChild(makeIconBtn(s.youtube, "youtube"));
+  if (s.kick) iconGroup.appendChild(makeIconBtn(s.kick, "kick"));
+  if (s.tiktok) iconGroup.appendChild(makeIconBtn(s.tiktok, "tiktok"));
 
   buttonsWrapper.appendChild(iconGroup);
   el.appendChild(buttonsWrapper);
