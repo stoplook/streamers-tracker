@@ -49,6 +49,7 @@ if (refreshBtn) refreshBtn.textContent = 'Обновить данные';
 // =====================
 // Settings
 // =====================
+// worker прокси (твоя ссылка)
 const WORKER_PROXY = "https://streamers-proxy.yasonsworkshop.workers.dev/proxy?url=";
 
 const STEAM_TTL_MS = 5 * 60 * 1000;           // 5 минут
@@ -141,35 +142,64 @@ async function fetchText(url, timeout = FETCH_TIMEOUT_MS) {
 }
 
 // =====================
-// Proxies (теперь через твой Worker)
+// Proxies (через WORKER_PROXY для steam/youtube)
 // =====================
 function proxyUrls(targetUrl) {
+  // основной — твой worker; при необходимости можно добавить дополнительные прокси
   return [
     `${WORKER_PROXY}${encodeURIComponent(targetUrl)}`
   ];
 }
 
+/*
+  fetchTextAnyWay:
+   - для steamcommunity.com и youtube.com сразу используем WORKER_PROXY (чтобы избежать CORS)
+   - для остальных URL: сначала пробуем прямой fetch, если не получилось — пробуем worker proxy
+*/
 async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
-  // direct обычно будет блокироваться CORS — но оставим на всякий
-  const direct = await fetchText(url, timeout);
-  if (direct) return direct;
+  try {
+    const isSteamOrYoutube = String(url).includes('steamcommunity.com') || String(url).includes('youtube.com');
 
-  for (const p of proxyUrls(url)) {
-    const t = await fetchText(p, timeout);
-    // для Steam/XML и decapi нам HTML не нужен
-    if (t && !t.includes('<!DOCTYPE html') && !t.includes('<html')) return t;
+    if (isSteamOrYoutube) {
+      const p = `${WORKER_PROXY}${encodeURIComponent(url)}`;
+      return await fetchText(p, timeout);
+    }
+
+    // сначала прямой запрос (быстрее, если доступен)
+    const direct = await fetchText(url, timeout);
+    if (direct) return direct;
+
+    // fallback -> worker proxy
+    for (const p of proxyUrls(url)) {
+      const t = await fetchText(p, timeout);
+      // для Steam/XML и decapi нам HTML обычно не нужен
+      if (t && !t.includes('<!DOCTYPE html') && !t.includes('<html')) return t;
+    }
+  } catch (e) {
+    // noop
   }
   return null;
 }
 
-// “достань что угодно, включая HTML” (нужно для YouTube handle -> channelId)
+// "достань всё, включая HTML" — нужен для получения HTML страницы YouTube по handle
 async function fetchTextAnyWayAllowHtml(url, timeout = FETCH_TIMEOUT_MS) {
-  const direct = await fetchText(url, timeout);
-  if (direct) return direct;
+  try {
+    const isSteamOrYoutube = String(url).includes('steamcommunity.com') || String(url).includes('youtube.com');
 
-  for (const p of proxyUrls(url)) {
-    const t = await fetchText(p, timeout);
-    if (t) return t;
+    if (isSteamOrYoutube) {
+      const p = `${WORKER_PROXY}${encodeURIComponent(url)}`;
+      return await fetchText(p, timeout);
+    }
+
+    const direct = await fetchText(url, timeout);
+    if (direct) return direct;
+
+    for (const p of proxyUrls(url)) {
+      const t = await fetchText(p, timeout);
+      if (t) return t;
+    }
+  } catch (e) {
+    // noop
   }
   return null;
 }
@@ -231,7 +261,7 @@ async function fetchSteamProfileWithRetry(steamUrl, maxAttempts = 4, delay = 110
 }
 
 // =====================
-// Twitch parsing
+// Twitch parsing & status
 // =====================
 function parseTwitchUsername(twitchUrl) {
   try {
@@ -244,7 +274,6 @@ function parseTwitchUsername(twitchUrl) {
   }
 }
 
-// STRICT 2-state (Twitch)
 async function getTwitchStatusStrict(username) {
   if (!username) return false;
 
