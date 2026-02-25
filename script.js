@@ -1,3 +1,5 @@
+console.log("SCRIPT VERSION: v3 - USING WORKER PROXY", "https://streamers-proxy.yasonsworkshop.workers.dev");
+
 const streamers = [
   { realName: "GEVAD1CH", steamUrl: "https://steamcommunity.com/profiles/76561198324172381", twitch: "https://twitch.tv/gevad1ch" },
   { realName: "Woodcock", steamUrl: "https://steamcommunity.com/profiles/76561198066336362" },
