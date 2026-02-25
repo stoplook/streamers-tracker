@@ -145,9 +145,7 @@ const ICONS = {
   steam: "https://img.icons8.com/ios-filled/50/66b2ff/steam.png",
   twitch: "https://img.icons8.com/ios-glyphs/30/66b2ff/twitch.png",
   youtube: "https://img.icons8.com/ios-filled/30/66b2ff/youtube-play.png",
-  kick: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
-  <path fill="currentColor" d="M4 3h7c3.6 0 5.8 1.9 5.8 4.8 0 2-1.2 3.6-3.2 4.3L18 21h-3.7l-3.6-8.3H7.1V21H4V3zm3.1 2.6v4.5H11c1.8 0 2.8-.9 2.8-2.2 0-1.4-1-2.3-2.8-2.3H7.1z"/>
-</svg>`,
+  kick: letterIconDataUri("K"),
 };
 
 // =====================
@@ -707,21 +705,6 @@ function makeIconBtn(href, iconSrc, alt) {
   a.target = "_blank";
   a.rel = "noopener noreferrer";
   a.className = "icon-btn";
-
-  // ✅ Если это inline SVG — вставляем как SVG (красится через currentColor)
-  if (typeof iconSrc === "string" && iconSrc.trim().startsWith("<svg")) {
-    a.innerHTML = iconSrc;
-    const svg = a.querySelector("svg");
-    if (svg) {
-      svg.setAttribute("width", "18");
-      svg.setAttribute("height", "18");
-      svg.setAttribute("role", "img");
-      svg.setAttribute("aria-label", alt || "");
-    }
-    return a;
-  }
-
-  // ✅ Иначе — обычная картинка
   a.innerHTML = `<img src="${iconSrc}" alt="${alt}"/>`;
   return a;
 }
