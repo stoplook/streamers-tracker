@@ -409,12 +409,25 @@ function ytRssUrl(channelId) {
 
 function detectLiveFromRss(rssText) {
   if (!rssText) return false;
-  const s = rssText.toLowerCase();
-  if (s.includes("yt:livebroadcastcontent") && s.includes(">live<")) return true;
-  if (s.includes('"islivecontent":true')) return true;
-  const hasEntry = s.includes("<entry");
-  if (hasEntry && s.includes("live")) return true;
-  return false;
+
+  try {
+    const xml = new DOMParser().parseFromString(rssText, "application/xml");
+    if (xml.getElementsByTagName("parsererror")?.[0]) return false;
+
+    const entries = Array.from(xml.getElementsByTagName("entry") || []);
+    for (const entry of entries) {
+      const all = Array.from(entry.getElementsByTagName("*") || []);
+      const liveEl = all.find(
+        (n) => (n?.localName || "").toLowerCase() === "livebroadcastcontent"
+      );
+
+      if ((liveEl?.textContent || "").trim().toLowerCase() === "live") return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function extractChannelIdFromYoutubeHtml(html) {
