@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <title>Streamers Tracker</title>
+
+  <link rel="stylesheet" href="style.css?v=4" />
+</head>
+<body>
+
+  <h1>Streamers Tracker v1.0</h1>
+
+  <div class="top-controls">
+    <input
+      type="text"
+      id="search-input"
+      placeholder="Поиск по имени / SteamID..."
+      autocomplete="off"
+      spellcheck="false"
+    />
+    <button id="refresh-btn" type="button">Обновить данные</button>
+  </div>
+
+  <div id="last-update" aria-live="polite">Последнее обновление: —</div>
+
+  <div id="streamers-container"></div>
+
+  <!-- Loader -->
+  <div id="loader-overlay" aria-hidden="true"></div>
+  <div id="loader" role="status" aria-live="polite" aria-label="Загрузка">
+    <div class="loader-spinner" aria-hidden="true"></div>
+    <div class="loader-text">Обновляем данные...</div>
+  </div>
+
+  <!-- Pop-up контейнер -->
+  <div class="popup-container" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Admin UI -->
+  <button id="admin-fab" type="button" aria-label="Админ" title="Админ">⚙</button>
+  <button id="new-streamer-fab" type="button" aria-label="Новый стример" title="Новый стример">+</button>
+
+  <div id="admin-modal" class="admin-modal" aria-hidden="true">
+    <div class="admin-modal__backdrop"></div>
+    <div class="admin-modal__panel" role="dialog" aria-modal="true" aria-label="Админ Панель">
+      <div class="admin-modal__header">
+        <div class="admin-modal__title">Админ Панель</div>
+        <button id="admin-close" class="admin-x" type="button" aria-label="Закрыть">✕</button>
+      </div>
+
+      <div class="admin-modal__body">
+        <div class="admin-row">
+          <label class="admin-label">ADMIN TOKEN</label>
+          <input id="admin-token" class="admin-input" placeholder="вставь ADMIN_TOKEN" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <div class="admin-actions">
+          <button id="admin-save" class="admin-btn" type="button">Сохранить</button>
+          <button id="admin-clear" class="admin-btn2" type="button">Очистить</button>
+        </div>
+
+        <div class="admin-hint" id="admin-hint"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="streamer-modal" class="admin-modal" aria-hidden="true">
+    <div class="admin-modal__backdrop"></div>
+    <div class="admin-modal__panel" role="dialog" aria-modal="true" aria-label="Стример">
+      <div class="admin-modal__header">
+        <div class="admin-modal__title" id="streamer-modal-title">Новый стример</div>
+        <button id="streamer-close" class="admin-x" type="button" aria-label="Закрыть">✕</button>
+      </div>
+
+      <div class="admin-modal__body">
+        <input id="streamer-id" type="hidden" />
+
+        <label class="admin-label">Real name</label>
+        <input id="streamer-realName" class="admin-input" placeholder="например: GEVAD1CH" />
+
+        <label class="admin-label">Steam URL</label>
+        <input id="streamer-steamUrl" class="admin-input" placeholder="https://steamcommunity.com/profiles/..." />
+
+        <label class="admin-label">Twitch (необязательно)</label>
+        <input id="streamer-twitch" class="admin-input" placeholder="https://twitch.tv/..." />
+
+        <label class="admin-label">YouTube (необязательно)</label>
+        <input id="streamer-youtube" class="admin-input" placeholder="https://youtube.com/@..." />
+
+        <label class="admin-label">Kick (необязательно)</label>
+        <input id="streamer-kick" class="admin-input" placeholder="https://kick.com/..." />
+
+        <label class="admin-label">TikTok (необязательно)</label>
+        <input id="streamer-tiktok" class="admin-input" placeholder="https://www.tiktok.com/@..." />
+
+        <label class="admin-label">BattleMetrics (необязательно)</label>
+        <input id="streamer-battleMetrics" class="admin-input" placeholder="https://www.battlemetrics.com/players/..." />
+
+        <div class="admin-actions" style="margin-top:12px">
+          <button id="streamer-save" class="admin-btn" type="button">Сохранить</button>
+          <button id="streamer-cancel" class="admin-btn2" type="button">Отмена</button>
+        </div>
+
+        <div class="admin-hint" id="streamer-hint"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js?v=9"></script>
+</body>
+</html>

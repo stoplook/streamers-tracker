@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin — Streamers Tracker</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:780px;margin:24px auto;padding:0 16px}
+    h1{margin:0 0 16px}
+    .card{border:1px solid #ddd;border-radius:12px;padding:14px;margin:12px 0}
+    label{display:block;font-size:12px;margin:10px 0 4px;color:#444}
+    input{width:100%;padding:10px;border:1px solid #ccc;border-radius:10px}
+    button{padding:10px 14px;border:0;border-radius:10px;cursor:pointer}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .btn{background:#111;color:#fff}
+    .btn2{background:#eee}
+    .muted{color:#666;font-size:12px}
+    .list-item{display:flex;justify-content:space-between;gap:10px;align-items:center}
+    code{background:#f5f5f5;padding:2px 6px;border-radius:6px}
+  </style>
+</head>
+<body>
+  <h1>Admin — Streamers Tracker</h1>
+  <div class="muted">
+    Доступ по токену. Не показывай токен никому.
+  </div>
+
+  <div class="card">
+    <label>Worker URL (без / в конце)</label>
+    <input id="worker" value="https://streamers-proxy.yasonsworkshop.workers.dev" />
+
+    <label>ADMIN TOKEN</label>
+    <input id="token" placeholder="вставь сюда ADMIN_TOKEN" />
+
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="load">Загрузить список</button>
+      <button class="btn2" id="saveLocal">Сохранить токен в браузере</button>
+      <button class="btn2" id="clearLocal">Очистить</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 10px">Добавить стримера</h3>
+
+    <label>Real name</label>
+    <input id="realName" placeholder="например: GEVAD1CH" />
+
+    <label>Steam URL</label>
+    <input id="steamUrl" placeholder="https://steamcommunity.com/profiles/..." />
+
+    <label>Twitch (необязательно)</label>
+    <input id="twitch" placeholder="https://twitch.tv/..." />
+
+    <label>YouTube (необязательно)</label>
+    <input id="youtube" placeholder="https://youtube.com/@..." />
+
+    <label>TikTok (необязательно)</label>
+    <input id="tiktok" placeholder="https://www.tiktok.com/@..." />
+
+    <label>BattleMetrics (необязательно)</label>
+    <input id="battleMetrics" placeholder="https://www.battlemetrics.com/players/..." />
+
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="add">Добавить</button>
+    </div>
+
+    <div class="muted" id="msg" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 10px">Текущий список</h3>
+    <div id="list" class="muted">Нажми “Загрузить список”.</div>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function setMsg(t){ $("msg").textContent = t || ""; }
+
+function getCfg(){
+  return {
+    worker: ($("worker").value || "").replace(/\/+$/,""),
+    token: $("token").value || ""
+  };
+}
+
+async function api(path, opts={}){
+  const { worker, token } = getCfg();
+  const headers = Object.assign(
+    { "Content-Type": "application/json" },
+    opts.headers || {},
+    token ? { "Authorization": "Bearer " + token } : {}
+  );
+  const res = await fetch(worker + path, { ...opts, headers });
+  const text = await res.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch {}
+  if (!res.ok) throw new Error((data && data.error) ? data.error : text || ("HTTP " + res.status));
+  return data ?? text;
+}
+
+async function loadList(){
+  setMsg("");
+  const { worker } = getCfg();
+  const res = await fetch(worker + "/streamers");
+  const items = await res.json();
+
+  const el = $("list");
+  if (!items.length){
+    el.textContent = "Пока пусто.";
+    return;
+  }
+
+  el.innerHTML = "";
+  items.forEach(it => {
+    const row = document.createElement("div");
+    row.className = "list-item";
+    row.innerHTML = `
+      <div>
+        <b>${it.realName}</b><br>
+        <span class="muted">Steam:</span> <a href="${it.steamUrl}" target="_blank">${it.steamUrl}</a><br>
+        ${it.twitch ? `<span class="muted">Twitch:</span> <a href="${it.twitch}" target="_blank">${it.twitch}</a><br>` : ""}
+        ${it.youtube ? `<span class="muted">YouTube:</span> <a href="${it.youtube}" target="_blank">${it.youtube}</a><br>` : ""}
+        ${it.tiktok ? `<span class="muted">TikTok:</span> <a href="${it.tiktok}" target="_blank">${it.tiktok}</a><br>` : ""}
+        ${it.battleMetrics ? `<span class="muted">BM:</span> <a href="${it.battleMetrics}" target="_blank">${it.battleMetrics}</a>` : ""}
+        <div class="muted">id: <code>${it.id}</code></div>
+      </div>
+      <button class="btn2" data-id="${it.id}">Удалить</button>
+    `;
+    row.querySelector("button").onclick = async () => {
+      if (!confirm("Точно удалить?")) return;
+      await api("/streamers?id=" + encodeURIComponent(it.id), { method:"DELETE" });
+      await loadList();
+      setMsg("Удалено ✅");
+    };
+    el.appendChild(row);
+    el.appendChild(document.createElement("hr"));
+  });
+}
+
+$("load").onclick = loadList;
+
+$("add").onclick = async () => {
+  try{
+    setMsg("Добавляем...");
+    const body = {
+      realName: $("realName").value.trim(),
+      steamUrl: $("steamUrl").value.trim(),
+      twitch: $("twitch").value.trim() || null,
+      youtube: $("youtube").value.trim() || null,
+      tiktok: $("tiktok").value.trim() || null,
+      battleMetrics: $("battleMetrics").value.trim() || null,
+    };
+
+    if (!body.realName || !body.steamUrl){
+      setMsg("Нужны минимум Real name и Steam URL");
+      return;
+    }
+
+    await api("/streamers", { method:"POST", body: JSON.stringify(body) });
+    setMsg("Добавлено ✅");
+    $("realName").value = "";
+    $("steamUrl").value = "";
+    $("twitch").value = "";
+    $("youtube").value = "";
+    $("tiktok").value = "";
+    $("battleMetrics").value = "";
+    await loadList();
+  }catch(e){
+    setMsg("Ошибка: " + e.message);
+  }
+};
+
+$("saveLocal").onclick = () => {
+  localStorage.setItem("st_worker", $("worker").value);
+  localStorage.setItem("st_token", $("token").value);
+  setMsg("Сохранено в браузере ✅");
+};
+
+$("clearLocal").onclick = () => {
+  localStorage.removeItem("st_worker");
+  localStorage.removeItem("st_token");
+  $("token").value = "";
+  setMsg("Очищено ✅");
+};
+
+(function init(){
+  const w = localStorage.getItem("st_worker");
+  const t = localStorage.getItem("st_token");
+  if (w) $("worker").value = w;
+  if (t) $("token").value = t;
+})();
+</script>
+</body>
+</html>
