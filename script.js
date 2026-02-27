@@ -1,9 +1,189 @@
 console.log("FRONT BUILD ✅", new Date().toISOString(), Math.random());
 
 console.log(
-  "SCRIPT VERSION: v11-TIKTOK-GRAY + MULTI-NETWORK-PRIORITY (ANY ONLINE => GREEN) + STREAMERS + ADMIN CRUD + KICK + TIKTOK",
+  "SCRIPT VERSION: v11-TIKTOK-GRAY + MULTI-NETWORK-PRIORITY (ANY ONLINE => GREEN) + STREAMERS + ADMIN CRUD + KICK + TIKTOK + SFX",
   "https://streamers-proxy.yasonsworkshop.workers.dev"
 );
+
+// =====================
+// Sound FX (WebAudio, tiny UI chimes)
+// =====================
+const SFX = (() => {
+  let ctx = null;
+  let master = null;
+  let enabled = true;
+  let unlocked = false;
+
+  // Respect reduced motion (often paired with reduced sensory)
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  if (reduceMotion) enabled = false;
+
+  const SFX_KEY = "sfx_enabled";
+  // Persist toggle (default ON unless user disabled)
+  enabled = enabled && (localStorage.getItem(SFX_KEY) !== "0");
+
+  function ensure() {
+    if (!enabled) return null;
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      master = ctx.createGain();
+      master.gain.value = 0.18; // master volume
+      master.connect(ctx.destination);
+    }
+    return ctx;
+  }
+
+  function now() {
+    return ctx?.currentTime ?? 0;
+  }
+
+  function unlock() {
+    if (!enabled) return;
+    const c = ensure();
+    if (!c) return;
+
+    if (c.state === "suspended") c.resume?.();
+
+    // Micro ping to fully unlock audio graph
+    try {
+      const o = c.createOscillator();
+      const g = c.createGain();
+      g.gain.value = 0.00001;
+      o.frequency.value = 440;
+      o.connect(g);
+      g.connect(master);
+      o.start();
+      o.stop(c.currentTime + 0.01);
+      unlocked = true;
+    } catch {}
+  }
+
+  function tone({ f = 880, t = 0.06, type = "sine", vol = 0.25, slideTo = null }) {
+    const c = ensure();
+    if (!c) return;
+
+    const o = c.createOscillator();
+    const g = c.createGain();
+    const tt = now();
+
+    o.type = type;
+    o.frequency.setValueAtTime(f, tt);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, tt + t);
+
+    g.gain.setValueAtTime(0.00001, tt);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.00001, vol), tt + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.00001, tt + t);
+
+    o.connect(g);
+    g.connect(master);
+
+    o.start(tt);
+    o.stop(tt + t + 0.02);
+  }
+
+  function noise({ t = 0.08, vol = 0.12 }) {
+    const c = ensure();
+    if (!c) return;
+
+    const tt = now();
+    const bufferSize = Math.floor(c.sampleRate * t);
+    const buffer = c.createBuffer(1, bufferSize, c.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+    const src = c.createBufferSource();
+    src.buffer = buffer;
+
+    const filter = c.createBiquadFilter();
+    filter.type = "highpass";
+    filter.frequency.value = 1200;
+
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.00001, tt);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.00001, vol), tt + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.00001, tt + t);
+
+    src.connect(filter);
+    filter.connect(g);
+    g.connect(master);
+
+    src.start(tt);
+    src.stop(tt + t + 0.02);
+  }
+
+  const events = {
+    // gentle “cards appeared”
+    cardsIn: () => {
+      tone({ f: 740, t: 0.05, type: "triangle", vol: 0.22, slideTo: 980 });
+      tone({ f: 980, t: 0.04, type: "sine", vol: 0.18 });
+    },
+    // refresh swipe + drop
+    refresh: () => {
+      noise({ t: 0.06, vol: 0.10 });
+      tone({ f: 520, t: 0.06, type: "sine", vol: 0.16, slideTo: 330 });
+    },
+    copy: () => tone({ f: 1200, t: 0.035, type: "square", vol: 0.10 }),
+    success: () => {
+      tone({ f: 784, t: 0.06, type: "sine", vol: 0.18 });
+      tone({ f: 988, t: 0.06, type: "sine", vol: 0.16 });
+      tone({ f: 1175, t: 0.06, type: "sine", vol: 0.14 });
+    },
+    error: () => tone({ f: 220, t: 0.10, type: "sawtooth", vol: 0.14, slideTo: 160 }),
+    online: () => tone({ f: 1040, t: 0.05, type: "triangle", vol: 0.12 }),
+    admin: () => tone({ f: 660, t: 0.04, type: "square", vol: 0.08 }),
+    muted: () => tone({ f: 260, t: 0.06, type: "sine", vol: 0.10 }),
+  };
+
+  const cooldown = new Map();
+  function play(name, ms = 180) {
+    if (!enabled) return;
+    if (!unlocked) return;
+
+    const key = String(name);
+    const last = cooldown.get(key) || 0;
+    const n = Date.now();
+    if (n - last < ms) return;
+    cooldown.set(key, n);
+
+    try {
+      events[name]?.();
+    } catch {}
+  }
+
+  function setEnabled(v) {
+    enabled = !!v;
+    localStorage.setItem(SFX_KEY, enabled ? "1" : "0");
+    if (enabled) ensure();
+  }
+
+  function setVolume(v) {
+    ensure();
+    if (master) master.gain.value = Math.max(0, Math.min(1, Number(v) || 0));
+  }
+
+  function isEnabled() {
+    return !!enabled;
+  }
+
+  return { unlock, play, setEnabled, setVolume, isEnabled };
+})();
+
+// Unlock sound on first user gesture
+window.addEventListener("pointerdown", () => SFX.unlock(), { once: true });
+window.addEventListener("keydown", () => SFX.unlock(), { once: true });
+
+// Quick mute toggle: press "M"
+document.addEventListener("keydown", (e) => {
+  if ((e?.key || "").toLowerCase() === "m") {
+    const next = !SFX.isEnabled();
+    SFX.setEnabled(next);
+    try {
+      showPopup(next ? "🔊 SFX ON" : "🔇 SFX OFF");
+    } catch {}
+    if (next) SFX.play("success");
+    else SFX.play("muted");
+  }
+});
 
 // =====================
 // Settings (Worker)
@@ -648,6 +828,7 @@ function openStreamerModal(mode, s) {
 }
 
 adminFab?.addEventListener?.("click", () => {
+  SFX.play("admin");
   if (!adminModal) return;
   if (adminTokenInput) adminTokenInput.value = adminToken || "";
   setHint(adminHint, "");
@@ -669,8 +850,13 @@ adminSave?.addEventListener?.("click", async () => {
   adminToken = (adminTokenInput?.value || "").trim();
   localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
   setHint(adminHint, "Проверяем...");
-  await tryEnableAdmin();
-  setHint(adminHint, adminEnabled ? "✅ Админ включен" : "❌ Неверный токен");
+  try {
+    await tryEnableAdmin();
+    setHint(adminHint, adminEnabled ? "✅ Админ включен" : "❌ Неверный токен");
+    SFX.play(adminEnabled ? "success" : "error");
+  } catch {
+    SFX.play("error");
+  }
 });
 
 adminClear?.addEventListener?.("click", async () => {
@@ -681,22 +867,31 @@ adminClear?.addEventListener?.("click", async () => {
   setAdminUiVisible();
   applyAdminToExistingCards();
   setHint(adminHint, "Очищено");
+  SFX.play("refresh");
 });
 
 adminTest?.addEventListener?.("click", async () => {
   setHint(adminHint, "Проверяем...");
   await tryEnableAdmin();
   setHint(adminHint, adminEnabled ? "✅ Ок" : "❌ Неверный токен");
+  SFX.play(adminEnabled ? "success" : "error");
 });
 
 newStreamerFab?.addEventListener?.("click", () => {
-  if (!adminEnabled) return showPopup("🔒 Нужен токен");
+  if (!adminEnabled) {
+    SFX.play("error");
+    return showPopup("🔒 Нужен токен");
+  }
+  SFX.play("cardsIn");
   openStreamerModal("new");
 });
 
 streamerSave?.addEventListener?.("click", async () => {
   try {
-    if (!adminEnabled) return setHint(streamerHint, "🔒 Нужен токен");
+    if (!adminEnabled) {
+      SFX.play("error");
+      return setHint(streamerHint, "🔒 Нужен токен");
+    }
 
     const body = {
       realName: (fRealName?.value || "").trim(),
@@ -709,6 +904,7 @@ streamerSave?.addEventListener?.("click", async () => {
     };
 
     if (!body.realName || !body.steamUrl) {
+      SFX.play("error");
       return setHint(streamerHint, "Нужны минимум Real name и Steam URL");
     }
 
@@ -721,12 +917,14 @@ streamerSave?.addEventListener?.("click", async () => {
         body: JSON.stringify(body),
       });
       showPopup("✅ Обновлено");
+      SFX.play("success");
     } else {
       await adminApi(`/streamers`, {
         method: "POST",
         body: JSON.stringify(body),
       });
       showPopup("✅ Добавлено");
+      SFX.play("success");
     }
 
     closeModal(streamerModal);
@@ -736,6 +934,7 @@ streamerSave?.addEventListener?.("click", async () => {
   } catch (e) {
     console.error(e);
     setHint(streamerHint, "Ошибка: " + (e?.message || "unknown"));
+    SFX.play("error");
   }
 });
 
@@ -769,20 +968,35 @@ function createStreamerCard(s, data) {
     <button class="admin-mini" type="button" title="Удалить" aria-label="Удалить">🗑</button>
   `;
   const btns = adminActions.querySelectorAll("button");
-  btns[0].onclick = () => openStreamerModal("edit", s);
+  btns[0].onclick = () => {
+    if (!adminEnabled) {
+      SFX.play("error");
+      return showPopup("🔒 Нужен токен");
+    }
+    SFX.play("admin");
+    openStreamerModal("edit", s);
+  };
   btns[1].onclick = async () => {
     try {
-      if (!adminEnabled) return;
-      if (!s.id) return showPopup("❌ Нет id");
+      if (!adminEnabled) {
+        SFX.play("error");
+        return;
+      }
+      if (!s.id) {
+        SFX.play("error");
+        return showPopup("❌ Нет id");
+      }
       if (!confirm(`Удалить "${s.realName}"?`)) return;
       await adminApi(`/streamers?id=${encodeURIComponent(s.id)}`, { method: "DELETE" });
       showPopup("✅ Удалено");
+      SFX.play("success");
       await loadStreamersList();
       await updateAllStreamers(true);
       applyAdminToExistingCards();
     } catch (e) {
       console.error(e);
       showPopup("❌ Ошибка удаления");
+      SFX.play("error");
     }
   };
   el.appendChild(adminActions);
@@ -833,8 +1047,10 @@ function createStreamerCard(s, data) {
     try {
       await navigator.clipboard.writeText(text);
       showPopup("✅ Скопировано!");
+      SFX.play("copy");
     } catch {
       showPopup("❌ Не удалось скопировать");
+      SFX.play("error");
     }
   });
 
@@ -977,9 +1193,7 @@ async function updateAllStreamers(forceRefresh = false) {
         }
 
         // ✅ ONLINE если хотя бы одна из сетей (twitch/youtube/kick) online
-        // Если обе/все оффлайн => красный
         const tasks = [];
-
         if (s.twitch) tasks.push(getTwitchStatusStrict(parseTwitchUsername(s.twitch)).catch(() => false));
         if (s.youtube) tasks.push(getYoutubeStatusStrict(s.youtube).catch(() => false));
         if (s.kick) tasks.push(getKickStatusStrict(s.kick).catch(() => false));
@@ -987,8 +1201,16 @@ async function updateAllStreamers(forceRefresh = false) {
         const results = await Promise.all(tasks);
         const online = results.some(Boolean);
 
-        card._status = online ? 0 : 1;
-        setIndicator(card, card._status);
+        const prev = typeof card._status === "number" ? card._status : null;
+        const next = online ? 0 : 1;
+
+        card._status = next;
+        setIndicator(card, next);
+
+        // SFX only when OFFLINE -> ONLINE
+        if (prev === 1 && next === 0) {
+          SFX.play("online", 600);
+        }
 
         statusDone++;
       })
@@ -1016,6 +1238,9 @@ async function updateAllStreamers(forceRefresh = false) {
 
   setLoading(false);
 
+  // SFX: after render complete
+  SFX.play(forceRefresh ? "refresh" : "cardsIn");
+
   lastUpdateTime = new Date().toLocaleTimeString();
   updateLastUpdateText();
   applySearchFilter();
@@ -1024,6 +1249,8 @@ async function updateAllStreamers(forceRefresh = false) {
 
 refreshBtn?.addEventListener?.("click", async () => {
   try {
+    SFX.play("refresh");
+
     steamCache.clear();
     statusCache.clear();
     ytChannelCache.clear();
@@ -1032,10 +1259,12 @@ refreshBtn?.addEventListener?.("click", async () => {
     await updateAllStreamers(true);
 
     showPopup("♻️ Данные обновлены!");
+    SFX.play("success");
   } catch (e) {
     console.error(e);
     showPopup("❌ Ошибка загрузки списка");
     setLoading(false);
+    SFX.play("error");
   }
 });
 
@@ -1053,5 +1282,6 @@ refreshBtn?.addEventListener?.("click", async () => {
     console.error(e);
     showPopup("❌ Не удалось загрузить список стримеров");
     setLoading(false);
+    SFX.play("error");
   }
 })();
