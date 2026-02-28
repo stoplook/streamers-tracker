@@ -502,7 +502,7 @@ h1 {
 }
 
 /* =========================
-   Online toast (final style)
+   Online toast (final v2)
    ========================= */
 
 .online-toast{
@@ -520,7 +520,7 @@ h1 {
   /* фон как карточки */
   background: rgba(16,16,18,0.95);
 
-  /* ✅ голубая обводка как в сайте */
+  /* голубая обводка как в сайте */
   border: 1px solid rgba(102,178,255,0.45);
 
   backdrop-filter: blur(8px);
@@ -557,28 +557,47 @@ h1 {
   color: rgba(255,255,255,0.9);
 }
 
-/* ✅ Зеленая надпись */
+/* ===== БАЗОВЫЙ заголовок (цвет задаётся состоянием) ===== */
 .online-toast__title{
   display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 800;
-  color: #00ff5f;   /* ← зеленый текст */
   margin-bottom: 6px;
 }
 
-/* ✅ Зеленый кружок */
+/* Кружок */
 .online-toast__title::before{
   content: "";
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #00ff5f;
+  transition: background .2s ease;
+}
 
-  /* аккуратная пульсация */
+/* ===== СОСТОЯНИЯ ===== */
+
+/* 🟢 Есть онлайн */
+.online-toast.is-online .online-toast__title{
+  color: #00ff5f;
+}
+
+.online-toast.is-online .online-toast__title::before{
+  background: #00ff5f;
   animation: toastPulse 1.2s ease-in-out infinite;
 }
 
+/* 🔴 Все оффлайн */
+.online-toast.is-offline .online-toast__title{
+  color: #ff4444;
+}
+
+.online-toast.is-offline .online-toast__title::before{
+  background: #ff4444;
+  animation: none; /* без пульса */
+}
+
+/* Пульсация только для online */
 @keyframes toastPulse{
   0%,100% { opacity: 1; transform: scale(1); }
   50%     { opacity: 0.35; transform: scale(0.75); }
