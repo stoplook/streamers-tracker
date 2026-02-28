@@ -566,16 +566,16 @@ h1 {
   margin-bottom: 6px;
 }
 
-/* Кружок */
+/* ===== БАЗОВЫЙ кружок (всегда виден) ===== */
 .online-toast__title::before{
   content: "";
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  transition: background .2s ease;
+  background: #7a7a7a; /* базовый серый */
+  flex-shrink: 0;
+  transition: background .2s ease, transform .2s ease, opacity .2s ease;
 }
-
-/* ===== СОСТОЯНИЯ ===== */
 
 /* 🟢 Есть онлайн */
 .online-toast.is-online .online-toast__title{
@@ -594,7 +594,7 @@ h1 {
 
 .online-toast.is-offline .online-toast__title::before{
   background: #ff4444;
-  animation: none; /* без пульса */
+  animation: none;
 }
 
 /* Пульсация только для online */
