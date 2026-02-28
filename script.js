@@ -189,13 +189,21 @@ function updateOnlineToastCounts() {
     if (c && c._status === 0) online++;
   }
 
-  onlineToastText.textContent = `${online} из ${total} стримеров`;
+  // Сначала удаляем оба состояния
+  onlineToast.classList.remove("is-online");
+  onlineToast.classList.remove("is-offline");
 
-  if (!document.body.classList.contains("toast-hidden")) {
-    setToastVisible(true);
+  if (online > 0) {
+    onlineToast.classList.add("is-online");
+    onlineToastText.textContent = `${online} из ${total} стримеров`;
+  } else {
+    onlineToast.classList.add("is-offline");
+    onlineToastText.textContent = "Никто не в эфире";
   }
 
-  syncToastLayout();
+  onlineToast.classList.add("is-visible");
+
+  syncToastLayout?.();
 }
 
 // =====================
