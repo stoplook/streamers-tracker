@@ -195,10 +195,10 @@ function updateOnlineToastCounts() {
 
   if (online > 0) {
     onlineToast.classList.add("is-online");
-    onlineToastText.textContent = `${online} из ${total} стримеров`;
+    onlineToastText.textContent = `${online} из ${total} стримеров.`;
   } else {
     onlineToast.classList.add("is-offline");
-    onlineToastText.textContent = "Никто не в эфире";
+    onlineToastText.textContent = "Никого нет в эфире.";
   }
 
   onlineToast.classList.add("is-visible");
