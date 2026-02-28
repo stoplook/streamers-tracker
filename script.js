@@ -107,33 +107,32 @@ if (refreshBtn) refreshBtn.textContent = "Обновить данные";
 // =====================
 // Online toast (bottom-right)
 // =====================
-const ONLINE_TOAST_KEY = "st_online_toast_closed";
-
 const onlineToast = document.getElementById("online-toast");
 const onlineToastText = document.getElementById("online-toast-text");
 const onlineToastClose = document.getElementById("online-toast-close");
 
-function isToastClosed() {
-  return localStorage.getItem(ONLINE_TOAST_KEY) === "1";
-}
+// ✅ закрыли только "на эту сессию" (до перезагрузки)
+let toastDismissedThisSession = false;
 
 function setToastVisible(visible) {
   if (!onlineToast) return;
+
+  onlineToast.style.display = visible ? "block" : "none";
   onlineToast.classList.toggle("is-visible", !!visible);
   onlineToast.setAttribute("aria-hidden", visible ? "false" : "true");
 }
 
-function closeToastForever() {
-  localStorage.setItem(ONLINE_TOAST_KEY, "1");
+function dismissToastThisSession() {
+  toastDismissedThisSession = true;
   setToastVisible(false);
 }
 
-onlineToastClose?.addEventListener?.("click", closeToastForever);
+onlineToastClose?.addEventListener?.("click", dismissToastThisSession);
 
 // Считает X online из Y (X — только статус 0; Y — общее кол-во стримеров)
 function updateOnlineToastCounts() {
   if (!onlineToast || !onlineToastText) return;
-  if (isToastClosed()) return;
+  if (toastDismissedThisSession) return;
 
   const cards = Array.from(container?.children || []);
   const total = streamers?.length || cards.length || 0;
