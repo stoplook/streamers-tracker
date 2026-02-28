@@ -201,7 +201,7 @@ function updateOnlineToastCounts() {
   } else {
     onlineToast.classList.add("is-offline");
     onlineToastTitle.textContent = "Сейчас оффлайн";
-    onlineToastText.textContent = "Никто не в эфире";
+    onlineToastText.textContent = "Никого нет в эфире";
   }
 
   setToastVisible(true);
