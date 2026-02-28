@@ -32,7 +32,7 @@ async function adminApi(path, opts = {}) {
     data = JSON.parse(text);
   } catch {}
   if (!res.ok) {
-    throw new Error(data && data.error ? data.error : text || "HTTP " + res.status);
+    throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
   }
   return data ?? text;
 }
@@ -103,62 +103,6 @@ const searchInput = document.getElementById("search-input");
 if (refreshBtn) refreshBtn.textContent = "Обновить данные";
 
 // =====================
-// Online toast (bottom-right)
-// =====================
-const onlineToast = document.getElementById("online-toast");
-const onlineToastText = document.getElementById("online-toast-text");
-const onlineToastClose = document.getElementById("online-toast-close");
-
-// закрыли только на эту загрузку страницы
-let toastDismissedThisSession = false;
-
-function setToastVisible(visible) {
-  if (!onlineToast) return;
-  onlineToast.style.display = visible ? "block" : "none";
-  onlineToast.classList.toggle("is-visible", !!visible);
-  onlineToast.setAttribute("aria-hidden", visible ? "false" : "true");
-}
-
-function dismissToastThisSession() {
-  toastDismissedThisSession = true;
-  setToastVisible(false);
-}
-
-onlineToastClose?.addEventListener?.("click", dismissToastThisSession);
-
-// X online из Y
-function updateOnlineToastCounts() {
-  if (!onlineToast || !onlineToastText) return;
-  if (toastDismissedThisSession) return;
-
-  const cards = Array.from(container?.children || []);
-  const total = streamers?.length || cards.length || 0;
-
-  let online = 0;
-  for (const c of cards) {
-    if (c && c._status === 0) online++;
-  }
-
-  onlineToastText.textContent = `${online} из ${total} стримеров`;
-
-  // показываем, если список есть
-  if (total > 0) setToastVisible(true);
-}
-
-// страховка: если вдруг вызвали слишком рано — повторить
-function ensureToastAfterRender() {
-  if (!onlineToast || !onlineToastText) return;
-  if (toastDismissedThisSession) return;
-  // если пока нет total — попробуем чуть позже
-  const total = streamers?.length || 0;
-  if (total <= 0) {
-    setTimeout(ensureToastAfterRender, 500);
-    return;
-  }
-  updateOnlineToastCounts();
-}
-
-// =====================
 // App settings
 // =====================
 const STEAM_TTL_MS = 5 * 60 * 1000;
@@ -170,7 +114,7 @@ const STATUS_CONCURRENCY = 4;
 
 const GREEN = "#00ff5f";
 const RED = "#ff4444";
-const GRAY = "#7a7a7a"; // TikTok/unknown
+const GRAY = "#7a7a7a"; // ✅ TikTok/unknown (всегда серый, не красный)
 
 // Default avatar
 const DEFAULT_AVATAR =
@@ -181,7 +125,7 @@ const DEFAULT_AVATAR =
 </svg>`);
 
 // =====================
-// Icons
+// “Иконки” без SVG path
 // =====================
 function letterIconDataUri(letter) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">
@@ -197,8 +141,7 @@ const ICONS = {
   twitch: "https://img.icons8.com/ios-glyphs/30/66b2ff/twitch.png",
   youtube: "https://img.icons8.com/ios-filled/30/66b2ff/youtube-play.png",
   kick: (() => {
-    const svg =
-      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" role="img" aria-label="Kick"><path fill="#66b2ff" d="M1.333 0h8v5.333H12V2.667h2.667V0h8v8H20v2.667h-2.667v2.666H20V16h2.667v8h-8v-2.667H12v-2.666H9.333V24h-8Z"/></svg>';
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" role="img" aria-label="Kick"><path fill="#66b2ff" d="M1.333 0h8v5.333H12V2.667h2.667V0h8v8H20v2.667h-2.667v2.666H20V16h2.667v8h-8v-2.667H12v-2.666H9.333V24h-8Z"/></svg>';
     return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
   })(),
   tiktok: "https://img.icons8.com/ios-filled/30/66b2ff/tiktok.png",
@@ -267,7 +210,7 @@ async function fetchText(url, timeout = FETCH_TIMEOUT_MS) {
     const fetchPromise = fetch(url, {
       signal: controller.signal,
       headers: { Accept: "*/*" },
-      cache: "no-store",
+      cache: "no-store", // ✅ важно
     })
       .then((r) => (r && r.ok ? r.text() : null))
       .catch(() => null);
@@ -287,7 +230,11 @@ function proxied(url) {
 
 function shouldForceProxy(url) {
   const s = String(url);
-  return s.includes("steamcommunity.com") || s.includes("youtube.com") || s.includes("kick.com");
+  return (
+    s.includes("steamcommunity.com") ||
+    s.includes("youtube.com") ||
+    s.includes("kick.com")
+  );
 }
 
 async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
@@ -372,7 +319,7 @@ async function fetchSteamProfileWithRetry(steamUrl, maxAttempts = 4, delay = 110
 }
 
 // =====================
-// Twitch (decapi)
+// Twitch (через decapi) + cacheBust
 // =====================
 function parseTwitchUsername(twitchUrl) {
   try {
@@ -424,7 +371,7 @@ async function getTwitchStatusStrict(username) {
 }
 
 // =====================
-// YouTube (RSS + HTML + worker)
+// YouTube (RSS) + cacheBust
 // =====================
 function extractYoutubeChannelIdFromUrl(youtubeUrl) {
   if (!youtubeUrl) return null;
@@ -577,7 +524,7 @@ async function getYoutubeStatusStrict(youtubeUrl) {
 }
 
 // =====================
-// Kick
+// Kick (через kick api v2 via proxy) + cacheBust
 // =====================
 function parseKickUsername(kickUrl) {
   try {
@@ -617,7 +564,7 @@ async function getKickStatusStrict(kickUrl) {
 }
 
 // =====================
-// TikTok — no API
+// TikTok — сейчас без надёжного API
 // =====================
 async function getTiktokStatusStrict(_tiktokUrl) {
   return false;
@@ -680,14 +627,14 @@ function openStreamerModal(mode, s) {
     if (fTiktok) fTiktok.value = "";
   } else {
     streamerTitle && (streamerTitle.textContent = "Редактировать стримера");
-    if (fId) fId.value = s?.id ?? "";
-    if (fRealName) fRealName.value = s?.realName ?? "";
-    if (fSteamUrl) fSteamUrl.value = s?.steamUrl ?? "";
-    if (fTwitch) fTwitch.value = s?.twitch ?? "";
-    if (fYoutube) fYoutube.value = s?.youtube ?? "";
-    if (fBm) fBm.value = s?.battleMetrics ?? "";
-    if (fKick) fKick.value = s?.kick ?? "";
-    if (fTiktok) fTiktok.value = s?.tiktok ?? "";
+    if (fId) fId.value = (s?.id ?? "");
+    if (fRealName) fRealName.value = (s?.realName ?? "");
+    if (fSteamUrl) fSteamUrl.value = (s?.steamUrl ?? "");
+    if (fTwitch) fTwitch.value = (s?.twitch ?? "");
+    if (fYoutube) fYoutube.value = (s?.youtube ?? "");
+    if (fBm) fBm.value = (s?.battleMetrics ?? "");
+    if (fKick) fKick.value = (s?.kick ?? "");
+    if (fTiktok) fTiktok.value = (s?.tiktok ?? "");
   }
 
   openModal(streamerModal);
@@ -844,6 +791,7 @@ function createStreamerCard(s, data) {
   if (s.twitch || s.youtube || s.kick || s.tiktok) {
     const indicator = document.createElement("span");
 
+    // ✅ если есть только TikTok (и нет twitch/youtube/kick), делаем серый сразу
     const hasCheckable = !!(s.twitch || s.youtube || s.kick);
     const initialColor = hasCheckable ? RED : GRAY;
 
@@ -920,10 +868,13 @@ function createStreamerCard(s, data) {
   return el;
 }
 
-// status: 0=online, 1=offline, 2=unknown
+// status: 0=online, 1=offline, 2=unknown (TikTok-only / не учитываем)
 function setIndicator(card, status) {
   if (!card._indicatorEl) return;
-  card._indicatorEl.style.background = status === 0 ? GREEN : status === 2 ? GRAY : RED;
+  card._indicatorEl.style.background =
+    status === 0 ? GREEN :
+    status === 2 ? GRAY :
+    RED;
 }
 
 // =====================
@@ -1010,14 +961,18 @@ async function updateAllStreamers(forceRefresh = false) {
         const s = streamers.find((st) => st.steamUrl === card._steamUrl);
         if (!s) return;
 
+        // ✅ TikTok-only (или вообще нет checkable сетей) => всегда серый, не красный
         if (!s.twitch && !s.youtube && !s.kick) {
-          card._status = 2;
-          setIndicator(card, 2);
+          card._status = 2;      // unknown
+          setIndicator(card, 2); // ✅ серый
           statusDone++;
           return;
         }
 
+        // ✅ ONLINE если хотя бы одна из сетей (twitch/youtube/kick) online
+        // Если обе/все оффлайн => красный
         const tasks = [];
+
         if (s.twitch) tasks.push(getTwitchStatusStrict(parseTwitchUsername(s.twitch)).catch(() => false));
         if (s.youtube) tasks.push(getYoutubeStatusStrict(s.youtube).catch(() => false));
         if (s.kick) tasks.push(getKickStatusStrict(s.kick).catch(() => false));
@@ -1035,7 +990,7 @@ async function updateAllStreamers(forceRefresh = false) {
     setLoading(true, `Проверяем статусы... ${statusDone}/${total}`);
   }
 
-  // sort online -> offline -> unknown
+  // sort online -> offline -> unknown (tiktok-only)
   cardsArray.sort((a, b) => {
     const sa = typeof a._status === "number" ? a._status : 1;
     const sb = typeof b._status === "number" ? b._status : 1;
@@ -1058,9 +1013,6 @@ async function updateAllStreamers(forceRefresh = false) {
   updateLastUpdateText();
   applySearchFilter();
   applyAdminToExistingCards();
-
-  // ✅ обновляем тост
-  updateOnlineToastCounts();
 }
 
 refreshBtn?.addEventListener?.("click", async () => {
@@ -1085,10 +1037,6 @@ refreshBtn?.addEventListener?.("click", async () => {
     setLoading(true, "Загружаем список стримеров...");
     await loadStreamersList();
     await updateAllStreamers(true);
-
-    // ✅ гарантированно показать (на случай гонок/кеша)
-    ensureToastAfterRender();
-    console.log("Toast ready ✅");
 
     setAdminUiVisible();
     if (adminToken) await tryEnableAdmin();
