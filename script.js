@@ -28,9 +28,7 @@ async function adminApi(path, opts = {}) {
   });
   const text = await res.text();
   let data = null;
-  try {
-    data = JSON.parse(text);
-  } catch {}
+  try { data = JSON.parse(text); } catch {}
   if (!res.ok) {
     throw new Error((data && data.error) ? data.error : (text || ("HTTP " + res.status)));
   }
@@ -103,6 +101,93 @@ const searchInput = document.getElementById("search-input");
 if (refreshBtn) refreshBtn.textContent = "Обновить данные";
 
 // =====================
+// Online toast (bottom-right)
+// Требует HTML:
+// #online-toast, #online-toast-text, #online-toast-close
+// =====================
+const onlineToast = document.getElementById("online-toast");
+const onlineToastText = document.getElementById("online-toast-text");
+const onlineToastClose = document.getElementById("online-toast-close");
+
+// закрытие только до перезагрузки страницы
+let toastDismissedThisSession = false;
+
+function setToastVisible(visible) {
+  if (!onlineToast) return;
+  onlineToast.classList.toggle("is-visible", !!visible);
+  onlineToast.setAttribute("aria-hidden", visible ? "false" : "true");
+}
+
+onlineToastClose?.addEventListener?.("click", () => {
+  toastDismissedThisSession = true;
+  setToastVisible(false);
+});
+
+// прячем тост, когда открыт loader или админ-модалка
+function syncToastVisibilityWithOverlays() {
+  const anyModalOpen = !!document.querySelector(".admin-modal.is-open");
+  const loaderOn = loaderOverlay && getComputedStyle(loaderOverlay).display !== "none";
+
+  document.body.classList.toggle("toast-hidden", anyModalOpen || loaderOn);
+
+  if (!(anyModalOpen || loaderOn) && !toastDismissedThisSession) {
+    setToastVisible(true);
+  }
+}
+
+// сдвиг тоста выше FAB-кнопок справа снизу (⚙ и +)
+function adjustToastPositionAwayFromFabs() {
+  if (!onlineToast) return;
+
+  let bottom = 16;
+  const fab1 = document.getElementById("admin-fab");
+  const fab2 = document.getElementById("new-streamer-fab");
+  const fabs = [fab1, fab2].filter(Boolean);
+
+  let maxNeed = 0;
+
+  for (const f of fabs) {
+    const cs = getComputedStyle(f);
+    if (cs.display === "none" || cs.visibility === "hidden" || cs.opacity === "0") continue;
+
+    const r = f.getBoundingClientRect();
+    const distToBottom = Math.max(0, window.innerHeight - r.bottom);
+    const need = r.height + distToBottom + 12; // gap
+    maxNeed = Math.max(maxNeed, need);
+  }
+
+  if (maxNeed > 0) bottom = maxNeed;
+  onlineToast.style.bottom = `${bottom}px`;
+}
+
+function syncToastLayout() {
+  syncToastVisibilityWithOverlays();
+  adjustToastPositionAwayFromFabs();
+}
+
+// считает X online из Y
+function updateOnlineToastCounts() {
+  if (!onlineToast || !onlineToastText) return;
+  if (toastDismissedThisSession) return;
+
+  const cards = Array.from(container?.children || []);
+  const total = streamers?.length || cards.length || 0;
+
+  let online = 0;
+  for (const c of cards) {
+    if (c && c._status === 0) online++;
+  }
+
+  onlineToastText.textContent = `${online} из ${total} стримеров`;
+
+  if (!document.body.classList.contains("toast-hidden")) {
+    setToastVisible(true);
+  }
+
+  syncToastLayout();
+}
+
+// =====================
 // App settings
 // =====================
 const STEAM_TTL_MS = 5 * 60 * 1000;
@@ -114,7 +199,7 @@ const STATUS_CONCURRENCY = 4;
 
 const GREEN = "#00ff5f";
 const RED = "#ff4444";
-const GRAY = "#7a7a7a"; // ✅ TikTok/unknown (всегда серый, не красный)
+const GRAY = "#7a7a7a"; // TikTok/unknown (всегда серый, не красный)
 
 // Default avatar
 const DEFAULT_AVATAR =
@@ -190,6 +275,8 @@ function setLoading(on, text) {
   if (loaderOverlay) loaderOverlay.style.display = on ? "block" : "none";
   const lt = loader?.querySelector?.(".loader-text");
   if (lt) lt.textContent = on ? text || "" : "";
+  // синкаем тост, чтобы не мешал, когда loader включен
+  syncToastVisibilityWithOverlays();
 }
 
 // =====================
@@ -210,7 +297,7 @@ async function fetchText(url, timeout = FETCH_TIMEOUT_MS) {
     const fetchPromise = fetch(url, {
       signal: controller.signal,
       headers: { Accept: "*/*" },
-      cache: "no-store", // ✅ важно
+      cache: "no-store",
     })
       .then((r) => (r && r.ok ? r.text() : null))
       .catch(() => null);
@@ -230,11 +317,7 @@ function proxied(url) {
 
 function shouldForceProxy(url) {
   const s = String(url);
-  return (
-    s.includes("steamcommunity.com") ||
-    s.includes("youtube.com") ||
-    s.includes("kick.com")
-  );
+  return s.includes("steamcommunity.com") || s.includes("youtube.com") || s.includes("kick.com");
 }
 
 async function fetchTextAnyWay(url, timeout = FETCH_TIMEOUT_MS) {
@@ -545,8 +628,8 @@ async function getKickStatusStrict(kickUrl) {
   if (cached !== null) return cached;
 
   const apiUrl = `https://kick.com/api/v2/channels/${encodeURIComponent(username)}?cacheBust=${Date.now()}`;
-
   const text = await fetchTextAnyWayAllowHtml(apiUrl, 15000);
+
   if (!text) {
     setTtl(statusCache, key, false);
     return false;
@@ -603,10 +686,14 @@ const fTiktok = document.getElementById("streamer-tiktok");
 function openModal(modal) {
   modal?.classList?.add("is-open");
   modal?.setAttribute?.("aria-hidden", "false");
+  // тост не должен мешать модалке
+  syncToastVisibilityWithOverlays();
 }
 function closeModal(modal) {
   modal?.classList?.remove("is-open");
   modal?.setAttribute?.("aria-hidden", "true");
+  // возвращаем тост
+  syncToastLayout();
 }
 function setHint(el, text) {
   if (el) el.textContent = text || "";
@@ -664,6 +751,7 @@ adminSave?.addEventListener?.("click", async () => {
   setHint(adminHint, "Проверяем...");
   await tryEnableAdmin();
   setHint(adminHint, adminEnabled ? "✅ Админ включен" : "❌ Неверный токен");
+  syncToastLayout();
 });
 
 adminClear?.addEventListener?.("click", async () => {
@@ -674,12 +762,14 @@ adminClear?.addEventListener?.("click", async () => {
   setAdminUiVisible();
   applyAdminToExistingCards();
   setHint(adminHint, "Очищено");
+  syncToastLayout();
 });
 
 adminTest?.addEventListener?.("click", async () => {
   setHint(adminHint, "Проверяем...");
   await tryEnableAdmin();
   setHint(adminHint, adminEnabled ? "✅ Ок" : "❌ Неверный токен");
+  syncToastLayout();
 });
 
 newStreamerFab?.addEventListener?.("click", () => {
@@ -791,7 +881,7 @@ function createStreamerCard(s, data) {
   if (s.twitch || s.youtube || s.kick || s.tiktok) {
     const indicator = document.createElement("span");
 
-    // ✅ если есть только TikTok (и нет twitch/youtube/kick), делаем серый сразу
+    // если есть только TikTok (и нет twitch/youtube/kick), делаем серый сразу
     const hasCheckable = !!(s.twitch || s.youtube || s.kick);
     const initialColor = hasCheckable ? RED : GRAY;
 
@@ -961,18 +1051,15 @@ async function updateAllStreamers(forceRefresh = false) {
         const s = streamers.find((st) => st.steamUrl === card._steamUrl);
         if (!s) return;
 
-        // ✅ TikTok-only (или вообще нет checkable сетей) => всегда серый, не красный
+        // TikTok-only => всегда серый
         if (!s.twitch && !s.youtube && !s.kick) {
-          card._status = 2;      // unknown
-          setIndicator(card, 2); // ✅ серый
+          card._status = 2;
+          setIndicator(card, 2);
           statusDone++;
           return;
         }
 
-        // ✅ ONLINE если хотя бы одна из сетей (twitch/youtube/kick) online
-        // Если обе/все оффлайн => красный
         const tasks = [];
-
         if (s.twitch) tasks.push(getTwitchStatusStrict(parseTwitchUsername(s.twitch)).catch(() => false));
         if (s.youtube) tasks.push(getYoutubeStatusStrict(s.youtube).catch(() => false));
         if (s.kick) tasks.push(getKickStatusStrict(s.kick).catch(() => false));
@@ -1013,6 +1100,9 @@ async function updateAllStreamers(forceRefresh = false) {
   updateLastUpdateText();
   applySearchFilter();
   applyAdminToExistingCards();
+
+  // ✅ обновляем тост после каждого обновления
+  updateOnlineToastCounts();
 }
 
 refreshBtn?.addEventListener?.("click", async () => {
@@ -1040,6 +1130,13 @@ refreshBtn?.addEventListener?.("click", async () => {
 
     setAdminUiVisible();
     if (adminToken) await tryEnableAdmin();
+
+    // ✅ тост должен всегда появляться при загрузке
+    updateOnlineToastCounts();
+    syncToastLayout();
+    setTimeout(() => { updateOnlineToastCounts(); syncToastLayout(); }, 700);
+
+    window.addEventListener("resize", syncToastLayout);
 
     startCountdown();
   } catch (e) {
