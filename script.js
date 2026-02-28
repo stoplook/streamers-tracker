@@ -1,10 +1,3 @@
-console.log("FRONT BUILD ✅", new Date().toISOString(), Math.random());
-
-console.log(
-  "SCRIPT VERSION: v11-TIKTOK-GRAY + MULTI-NETWORK-PRIORITY (ANY ONLINE => GREEN) + STREAMERS + ADMIN CRUD + KICK + TIKTOK",
-  "https://streamers-proxy.yasonsworkshop.workers.dev"
-);
-
 // =====================
 // Settings (Worker)
 // =====================
