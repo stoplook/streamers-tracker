@@ -139,7 +139,7 @@ function syncToastVisibilityWithOverlays() {
 function adjustToastPositionAwayFromFabs() {
   if (!onlineToast) return;
 
-  // ✅ гарантируем, что тост не "прилип" к top
+  // гарантируем: тост считается от НИЗА
   onlineToast.style.top = "auto";
   onlineToast.style.left = "auto";
   onlineToast.style.right = "16px";
@@ -157,8 +157,13 @@ function adjustToastPositionAwayFromFabs() {
     if (cs.display === "none" || cs.visibility === "hidden" || cs.opacity === "0") continue;
 
     const r = f.getBoundingClientRect();
-    const distToBottom = Math.max(0, window.innerHeight - r.bottom);
-    const need = r.height + distToBottom + 12; // + gap
+    const distToBottom = window.innerHeight - r.bottom;
+
+    // ✅ ВАЖНО:
+    // если кнопка далеко от низа (например сверху) — НЕ учитываем её вообще
+    if (distToBottom > 220) continue;
+
+    const need = r.height + distToBottom + 12; // + небольшой зазор
     maxNeed = Math.max(maxNeed, need);
   }
 
