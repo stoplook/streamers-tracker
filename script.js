@@ -104,10 +104,12 @@ if (refreshBtn) refreshBtn.textContent = "Обновить данные";
 // Online toast (bottom-right)
 // Требует HTML:
 // #online-toast, #online-toast-text, #online-toast-close
+// + .online-toast__title
 // =====================
 const onlineToast = document.getElementById("online-toast");
 const onlineToastText = document.getElementById("online-toast-text");
 const onlineToastClose = document.getElementById("online-toast-close");
+const onlineToastTitle = document.querySelector(".online-toast__title");
 
 // закрытие только до перезагрузки страницы
 let toastDismissedThisSession = false;
@@ -139,7 +141,6 @@ function syncToastVisibilityWithOverlays() {
 function adjustToastPositionAwayFromFabs() {
   if (!onlineToast) return;
 
-  // гарантируем: тост считается от НИЗА
   onlineToast.style.top = "auto";
   onlineToast.style.left = "auto";
   onlineToast.style.right = "16px";
@@ -159,11 +160,10 @@ function adjustToastPositionAwayFromFabs() {
     const r = f.getBoundingClientRect();
     const distToBottom = window.innerHeight - r.bottom;
 
-    // ✅ ВАЖНО:
-    // если кнопка далеко от низа (например сверху) — НЕ учитываем её вообще
+    // если FAB вообще не возле низа — не учитываем
     if (distToBottom > 220) continue;
 
-    const need = r.height + distToBottom + 12; // + небольшой зазор
+    const need = r.height + distToBottom + 12;
     maxNeed = Math.max(maxNeed, need);
   }
 
@@ -176,9 +176,11 @@ function syncToastLayout() {
   adjustToastPositionAwayFromFabs();
 }
 
-// считает X online из Y
+// ✅ 2 режима только:
+// - online: "Сейчас онлайн" + "X из Y стримеров"
+// - offline: "Сейчас оффлайн" + "Никто не в эфире"
 function updateOnlineToastCounts() {
-  if (!onlineToast || !onlineToastText) return;
+  if (!onlineToast || !onlineToastText || !onlineToastTitle) return;
   if (toastDismissedThisSession) return;
 
   const cards = Array.from(container?.children || []);
@@ -189,21 +191,21 @@ function updateOnlineToastCounts() {
     if (c && c._status === 0) online++;
   }
 
-  // Сначала удаляем оба состояния
-  onlineToast.classList.remove("is-online");
-  onlineToast.classList.remove("is-offline");
+  // снимаем состояния
+  onlineToast.classList.remove("is-online", "is-offline");
 
   if (online > 0) {
     onlineToast.classList.add("is-online");
-    onlineToastText.textContent = `${online} из ${total} стримеров.`;
+    onlineToastTitle.textContent = "Сейчас онлайн";
+    onlineToastText.textContent = `${online} из ${total} стримеров`;
   } else {
     onlineToast.classList.add("is-offline");
-    onlineToastText.textContent = "Никого нет в эфире.";
+    onlineToastTitle.textContent = "Сейчас оффлайн";
+    onlineToastText.textContent = "Никто не в эфире";
   }
 
-  onlineToast.classList.add("is-visible");
-
-  syncToastLayout?.();
+  setToastVisible(true);
+  syncToastLayout();
 }
 
 // =====================
@@ -294,7 +296,8 @@ function setLoading(on, text) {
   if (loaderOverlay) loaderOverlay.style.display = on ? "block" : "none";
   const lt = loader?.querySelector?.(".loader-text");
   if (lt) lt.textContent = on ? text || "" : "";
-  // синкаем тост, чтобы не мешал, когда loader включен
+
+  // тост не мешает лоадеру
   syncToastVisibilityWithOverlays();
 }
 
@@ -705,13 +708,11 @@ const fTiktok = document.getElementById("streamer-tiktok");
 function openModal(modal) {
   modal?.classList?.add("is-open");
   modal?.setAttribute?.("aria-hidden", "false");
-  // тост не должен мешать модалке
   syncToastVisibilityWithOverlays();
 }
 function closeModal(modal) {
   modal?.classList?.remove("is-open");
   modal?.setAttribute?.("aria-hidden", "true");
-  // возвращаем тост
   syncToastLayout();
 }
 function setHint(el, text) {
@@ -900,7 +901,6 @@ function createStreamerCard(s, data) {
   if (s.twitch || s.youtube || s.kick || s.tiktok) {
     const indicator = document.createElement("span");
 
-    // если есть только TikTok (и нет twitch/youtube/kick), делаем серый сразу
     const hasCheckable = !!(s.twitch || s.youtube || s.kick);
     const initialColor = hasCheckable ? RED : GRAY;
 
@@ -1120,7 +1120,7 @@ async function updateAllStreamers(forceRefresh = false) {
   applySearchFilter();
   applyAdminToExistingCards();
 
-    // ✅ обновляем тост после каждого обновления
+  // ✅ обновляем тост после каждого обновления
   updateOnlineToastCounts();
   syncToastLayout();
 }
@@ -1134,7 +1134,7 @@ refreshBtn?.addEventListener?.("click", async () => {
     await loadStreamersList();
     await updateAllStreamers(true);
 
-    // ✅ тост после ручного обновления тоже гарантированно обновим
+    // ✅ тост после ручного обновления тоже обновим
     updateOnlineToastCounts();
     syncToastLayout();
 
@@ -1150,13 +1150,12 @@ refreshBtn?.addEventListener?.("click", async () => {
   try {
     setLoading(true, "Загружаем список стримеров...");
 
-    // ✅ сразу показываем тост (пока данные грузятся)
-    // чтобы он "всегда появлялся" при заходе на сайт
-    toastDismissedThisSession = false;   // сброс закрытия на перезагрузке
+    // ✅ сразу показываем тост при заходе на сайт
+    toastDismissedThisSession = false;
     setToastVisible(true);
-    if (onlineToastText) onlineToastText.textContent = "Загрузка...";
-
-    // ✅ позиционирование сразу
+    if (onlineToastTitle) onlineToastTitle.textContent = "Загрузка...";
+    if (onlineToastText) onlineToastText.textContent = "Проверяем статусы...";
+    onlineToast?.classList?.remove("is-online", "is-offline");
     syncToastLayout();
 
     await loadStreamersList();
@@ -1165,19 +1164,17 @@ refreshBtn?.addEventListener?.("click", async () => {
     setAdminUiVisible();
     if (adminToken) await tryEnableAdmin();
 
-    // ✅ финальное обновление тоста после того как статусы реально посчитались
+    // ✅ финальное обновление тоста после подсчёта статусов
     updateOnlineToastCounts();
     syncToastLayout();
 
-    // ✅ ещё раз через чуть-чуть (на всякий, если браузер дорисовывает layout)
+    // ✅ ещё раз чуть позже (иногда браузер дорисовывает layout)
     setTimeout(() => {
       updateOnlineToastCounts();
       syncToastLayout();
     }, 300);
 
-    window.addEventListener("resize", () => {
-      syncToastLayout();
-    });
+    window.addEventListener("resize", syncToastLayout);
 
     startCountdown();
   } catch (e) {
