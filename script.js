@@ -139,7 +139,13 @@ function syncToastVisibilityWithOverlays() {
 function adjustToastPositionAwayFromFabs() {
   if (!onlineToast) return;
 
+  // ✅ гарантируем, что тост не "прилип" к top
+  onlineToast.style.top = "auto";
+  onlineToast.style.left = "auto";
+  onlineToast.style.right = "16px";
+
   let bottom = 16;
+
   const fab1 = document.getElementById("admin-fab");
   const fab2 = document.getElementById("new-streamer-fab");
   const fabs = [fab1, fab2].filter(Boolean);
@@ -152,7 +158,7 @@ function adjustToastPositionAwayFromFabs() {
 
     const r = f.getBoundingClientRect();
     const distToBottom = Math.max(0, window.innerHeight - r.bottom);
-    const need = r.height + distToBottom + 12; // gap
+    const need = r.height + distToBottom + 12; // + gap
     maxNeed = Math.max(maxNeed, need);
   }
 
