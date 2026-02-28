@@ -500,3 +500,63 @@ h1 {
 #streamer-tiktok:focus{
   border-color: rgba(102,178,255,0.9);
 }
+
+/* =========================
+   Online toast (bottom-right)
+   ========================= */
+.online-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: min(320px, calc(100vw - 32px));
+  background: rgba(18, 18, 18, 0.92);
+  border: 1px solid rgba(102, 178, 255, 0.35);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  color: #eaeaea;
+  padding: 12px 14px;
+  z-index: 9999;
+  backdrop-filter: blur(8px);
+
+  transform: translateY(12px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .22s ease, transform .22s ease;
+}
+
+.online-toast.is-visible {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.online-toast__close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #cfcfcf;
+  font-size: 20px;
+  line-height: 28px;
+  cursor: pointer;
+}
+
+.online-toast__close:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.online-toast__title {
+  font-weight: 700;
+  font-size: 14px;
+  color: #66b2ff;
+  margin-bottom: 4px;
+}
+
+.online-toast__text {
+  font-size: 13px;
+  color: #eaeaea;
+}
