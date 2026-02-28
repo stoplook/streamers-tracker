@@ -1112,8 +1112,9 @@ async function updateAllStreamers(forceRefresh = false) {
   applySearchFilter();
   applyAdminToExistingCards();
 
-  // ✅ обновляем тост после каждого обновления
+    // ✅ обновляем тост после каждого обновления
   updateOnlineToastCounts();
+  syncToastLayout();
 }
 
 refreshBtn?.addEventListener?.("click", async () => {
@@ -1124,6 +1125,10 @@ refreshBtn?.addEventListener?.("click", async () => {
 
     await loadStreamersList();
     await updateAllStreamers(true);
+
+    // ✅ тост после ручного обновления тоже гарантированно обновим
+    updateOnlineToastCounts();
+    syncToastLayout();
 
     showPopup("♻️ Данные обновлены!");
   } catch (e) {
@@ -1136,18 +1141,35 @@ refreshBtn?.addEventListener?.("click", async () => {
 (async () => {
   try {
     setLoading(true, "Загружаем список стримеров...");
+
+    // ✅ сразу показываем тост (пока данные грузятся)
+    // чтобы он "всегда появлялся" при заходе на сайт
+    toastDismissedThisSession = false;   // сброс закрытия на перезагрузке
+    setToastVisible(true);
+    if (onlineToastText) onlineToastText.textContent = "Загрузка...";
+
+    // ✅ позиционирование сразу
+    syncToastLayout();
+
     await loadStreamersList();
     await updateAllStreamers(true);
 
     setAdminUiVisible();
     if (adminToken) await tryEnableAdmin();
 
-    // ✅ тост должен всегда появляться при загрузке
+    // ✅ финальное обновление тоста после того как статусы реально посчитались
     updateOnlineToastCounts();
     syncToastLayout();
-    setTimeout(() => { updateOnlineToastCounts(); syncToastLayout(); }, 700);
 
-    window.addEventListener("resize", syncToastLayout);
+    // ✅ ещё раз через чуть-чуть (на всякий, если браузер дорисовывает layout)
+    setTimeout(() => {
+      updateOnlineToastCounts();
+      syncToastLayout();
+    }, 300);
+
+    window.addEventListener("resize", () => {
+      syncToastLayout();
+    });
 
     startCountdown();
   } catch (e) {
