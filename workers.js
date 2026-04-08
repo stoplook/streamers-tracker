@@ -13,6 +13,7 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
+    // ✅ общий JSON helper (по умолчанию no-store как и было)
     const json = (obj, status = 200, extra = {}) =>
       new Response(JSON.stringify(obj), {
         status,
@@ -29,6 +30,7 @@ export default {
       request.headers.get("User-Agent") ||
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36";
 
+    // ✅ как и было: для внешних fetch выключаем CF cache
     const cfNoCache = { cf: { cacheTtl: 0, cacheEverything: false } };
 
     // ---------------------
@@ -49,7 +51,7 @@ export default {
         "User-Agent": UA,
         "Accept-Language": "en-US,en;q=0.9,ru;q=0.8,uk;q=0.7",
         "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
+        Pragma: "no-cache",
       };
 
       if (isYouTubeRss(t)) {
@@ -88,6 +90,16 @@ export default {
       return { r, ct, text };
     }
 
+    // ✅ helper: безопасный ключ кеша (убираем debug и cacheBust/ v)
+    function makeCacheKey(reqUrl) {
+      const u = new URL(reqUrl);
+      // не кешируем debug, и не кешируем "бустеры"
+      u.searchParams.delete("debug");
+      u.searchParams.delete("v");
+      u.searchParams.delete("cacheBust");
+      return u.toString();
+    }
+
     // ============================================================
     // PUBLIC: STATUS KICK (NO CACHE + DEBUG)
     // GET /status/kick?u=username[&debug=1]
@@ -122,7 +134,8 @@ export default {
         const data = JSON.parse(text);
         const hasLivestream = data?.livestream != null;
         const isLiveFlag = data?.livestream?.is_live;
-        const online = hasLivestream && (isLiveFlag === true || isLiveFlag == null);
+        const online =
+          hasLivestream && (isLiveFlag === true || isLiveFlag == null);
 
         return json(
           {
@@ -158,6 +171,10 @@ export default {
     // GET /status/youtube?u=<youtubeUrl>&debug=1
     //
     // Требует env.YT_API_KEY (secret)
+    //
+    // ✅ ИЗМЕНЕНИЕ: добавили edge-cache на 90 секунд
+    // - debug=1 НЕ кешируем
+    // - обычные запросы кешируем => квота падает в разы
     // ============================================================
     if (url.pathname === "/status/youtube" && request.method === "GET") {
       const inputUrl = (url.searchParams.get("u") || "").trim();
@@ -165,10 +182,16 @@ export default {
       if (!inputUrl) return json({ error: "Missing u" }, 400);
 
       if (!env?.YT_API_KEY) {
-        return json(
-          { online: false, error: "missing_YT_API_KEY_secret" },
-          500
-        );
+        return json({ online: false, error: "missing_YT_API_KEY_secret" }, 500);
+      }
+
+      // ✅ edge cache: только если НЕ debug
+      const cache = caches.default;
+      if (!debug) {
+        const keyUrl = makeCacheKey(request.url);
+        const cacheKeyReq = new Request(keyUrl, { method: "GET" });
+        const cached = await cache.match(cacheKeyReq);
+        if (cached) return cached;
       }
 
       function extractChannelIdFromUrl(u) {
@@ -179,11 +202,8 @@ export default {
 
       function extractHandleFromUrl(u) {
         const s = String(u || "").trim();
-        // @handle
         let m = s.match(/youtube\.com\/@([^/?#]+)/i);
         if (m) return m[1];
-        // youtu.be / watch links are not handles -> return null
-        // c/ and user/ behave like names; we can still use them as query
         m = s.match(/youtube\.com\/c\/([^/?#]+)/i);
         if (m) return m[1];
         m = s.match(/youtube\.com\/user\/([^/?#]+)/i);
@@ -213,105 +233,105 @@ export default {
       let channelId = extractChannelIdFromUrl(inputUrl);
       const resolveInfo = { step: null, urls: [] };
 
+      let out = null;
+
       try {
         // 1) if no direct UC..., resolve by searching channel by handle/name
         if (!channelId) {
           const q = extractHandleFromUrl(inputUrl);
           if (!q) {
-            return json(
-              { online: false, channelId: null, error: "channel_not_resolved" },
-              200
-            );
-          }
+            out = { online: false, channelId: null, error: "channel_not_resolved" };
+          } else {
+            resolveInfo.step = "search_channel_by_query";
+            const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=1&q=${encodeURIComponent(
+              q
+            )}&key=${encodeURIComponent(env.YT_API_KEY)}`;
 
-          resolveInfo.step = "search_channel_by_query";
-          const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=1&q=${encodeURIComponent(
-            q
-          )}&key=${encodeURIComponent(env.YT_API_KEY)}`;
+            resolveInfo.urls.push(searchUrl);
 
-          resolveInfo.urls.push(searchUrl);
+            const { r, data } = await ytFetchJson(searchUrl);
 
-          const { r, data } = await ytFetchJson(searchUrl);
-
-          if (!r.ok) {
-            return json(
-              {
+            if (!r.ok) {
+              out = {
                 online: false,
                 channelId: null,
                 error: "yt_api_search_failed",
-                ...(debug
-                  ? { httpStatus: r.status, apiError: data?.error || null }
-                  : {}),
-              },
-              200
-            );
-          }
+                ...(debug ? { httpStatus: r.status, apiError: data?.error || null } : {}),
+              };
+            } else {
+              channelId = data?.items?.[0]?.snippet?.channelId || null;
 
-          channelId = data?.items?.[0]?.snippet?.channelId || null;
-
-          if (!channelId) {
-            return json(
-              {
-                online: false,
-                channelId: null,
-                error: "channel_not_found",
-                ...(debug ? { resolveInfo, sample: data } : {}),
-              },
-              200
-            );
+              if (!channelId) {
+                out = {
+                  online: false,
+                  channelId: null,
+                  error: "channel_not_found",
+                  ...(debug ? { resolveInfo, sample: data } : {}),
+                };
+              }
+            }
           }
         }
 
         // 2) Check live now via search eventType=live
-        resolveInfo.step = "search_live_by_channelId";
-        const liveUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${encodeURIComponent(
-          channelId
-        )}&eventType=live&type=video&maxResults=1&key=${encodeURIComponent(
-          env.YT_API_KEY
-        )}`;
+        if (!out) {
+          resolveInfo.step = "search_live_by_channelId";
+          const liveUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${encodeURIComponent(
+            channelId
+          )}&eventType=live&type=video&maxResults=1&key=${encodeURIComponent(
+            env.YT_API_KEY
+          )}`;
 
-        resolveInfo.urls.push(liveUrl);
+          resolveInfo.urls.push(liveUrl);
 
-        const { r: r2, data: d2 } = await ytFetchJson(liveUrl);
+          const { r: r2, data: d2 } = await ytFetchJson(liveUrl);
 
-        if (!r2.ok) {
-          return json(
-            {
+          if (!r2.ok) {
+            out = {
               online: false,
               channelId,
               error: "yt_api_live_check_failed",
-              ...(debug
-                ? { httpStatus: r2.status, apiError: d2?.error || null }
-                : {}),
-            },
-            200
-          );
+              ...(debug ? { httpStatus: r2.status, apiError: d2?.error || null } : {}),
+            };
+          } else {
+            const liveItem = d2?.items?.[0] || null;
+            const videoId = liveItem?.id?.videoId || null;
+            const online = !!videoId;
+
+            out = {
+              online,
+              channelId,
+              videoUrl: videoId ? `https://www.youtube.com/watch?v=${videoId}` : null,
+              ...(debug ? { resolveInfo } : {}),
+            };
+          }
         }
-
-        const liveItem = d2?.items?.[0] || null;
-        const videoId = liveItem?.id?.videoId || null;
-        const online = !!videoId;
-
-        return json(
-          {
-            online,
-            channelId,
-            videoUrl: videoId ? `https://www.youtube.com/watch?v=${videoId}` : null,
-            ...(debug ? { resolveInfo } : {}),
-          },
-          200
-        );
       } catch (e) {
-        return json(
-          {
-            online: false,
-            channelId: channelId || null,
-            error: "yt_api_exception",
-            ...(debug ? { message: String(e?.message || e), resolveInfo } : {}),
-          },
-          200
-        );
+        out = {
+          online: false,
+          channelId: channelId || null,
+          error: "yt_api_exception",
+          ...(debug ? { message: String(e?.message || e), resolveInfo } : {}),
+        };
       }
+
+      // ✅ отдаём ответ
+      // - обычный режим: кешируем на 90 секунд
+      // - debug режим: no-store (не кешируем)
+      if (!debug) {
+        const resp = json(out, 200, {
+          // public нужен для edge-cache, max-age регулируй (60-180 норм)
+          "Cache-Control": "public, max-age=90",
+        });
+
+        const keyUrl = makeCacheKey(request.url);
+        const cacheKeyReq = new Request(keyUrl, { method: "GET" });
+        await cache.put(cacheKeyReq, resp.clone());
+
+        return resp;
+      }
+
+      return json(out, 200);
     }
 
     // ============================================================
@@ -337,8 +357,6 @@ export default {
       const username = parseTiktokUsername(input);
       if (!username) return json({ online: false, error: "bad_username" }, 200);
 
-      // Основной способ — внутренний API TikTok, как в TikTokLive:
-      // https://www.tiktok.com/api/live/detail/?aid=1988&uniqueId=<username>
       const apiUrl = `https://www.tiktok.com/api/live/detail/?aid=1988&uniqueId=${encodeURIComponent(
         username
       )}`;
@@ -353,9 +371,9 @@ export default {
           data = null;
         }
 
-        // По аналогии с TikTokLive: liveRoom.status !== 4 => онлайн
         const liveRoom = data?.data?.liveRoom || null;
-        const status = typeof liveRoom?.status === "number" ? liveRoom.status : null;
+        const status =
+          typeof liveRoom?.status === "number" ? liveRoom.status : null;
         const online = status !== null && status !== 4;
 
         return json(
@@ -373,7 +391,6 @@ export default {
           200
         );
       } catch (e) {
-        // fallback: считаем оффлайн, но не ломаемся
         return json(
           {
             online: false,
@@ -527,4 +544,3 @@ export default {
     });
   },
 };
-
