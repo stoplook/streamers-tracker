@@ -6,6 +6,103 @@ const WORKER_PROXY = `${WORKER_BASE}/proxy?url=`;
 const STREAMERS_API = `${WORKER_BASE}/streamers`;
 
 // =====================
+// Steam hours (Rust)
+// =====================
+function buildSteamUrl(value) {
+  value = value.trim();
+
+  if (!value) return null;
+
+  // если уже ссылка
+  if (value.startsWith("http")) {
+    return value.includes("/recommended")
+      ? value
+      : value.replace(/\/+$/, "") + "/recommended";
+  }
+
+  // SteamID64
+  if (/^\d+$/.test(value)) {
+    return `https://steamcommunity.com/profiles/${value}/recommended`;
+  }
+
+  // кастомный ник
+  return `https://steamcommunity.com/id/${value}/recommended`;
+}
+
+async function fetchRustHours(steamInput) {
+  try {
+    const url = buildSteamUrl(steamInput);
+    if (!url) return null;
+
+    const res = await fetch(WORKER_PROXY + encodeURIComponent(url));
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    if (!html || html.length < 100) return null;
+
+    const doc = new DOMParser().parseFromString(html, "text/html");
+
+    // ищем Rust (app 252490)
+    const links = doc.querySelectorAll("a[href*='/app/252490']");
+
+    for (const link of links) {
+      const parent = link.closest(".review_box");
+      if (!parent) continue;
+
+      const hours = parent.querySelector(".hours");
+
+      if (hours && hours.textContent) {
+        const text = hours.textContent.trim();
+
+        // достаём число
+        const match = text.match(/[\d.,]+/);
+        return match ? match[0] : text;
+      }
+    }
+
+    return null;
+
+  } catch (e) {
+    console.error("Steam hours error:", e);
+    return null;
+  }
+}
+
+// =====================
+// Load Rust hours for all cards
+// =====================
+async function loadRustHoursForAll(streamers, cardsArray) {
+
+  for (let i = 0; i < cardsArray.length; i += 2) {
+    const chunk = cardsArray.slice(i, i + 2);
+
+    await Promise.all(
+      chunk.map(async (card) => {
+        try {
+          const streamer = streamers.find(s => s.steamUrl === card._steamUrl);
+          if (!streamer) return;
+
+          const el = document.getElementById(`hours-${streamer.id}`);
+          if (!el) return;
+
+          const hours = await fetchRustHours(streamer.steamUrl);
+
+          el.textContent = hours
+            ? `🦀 Часы в Rust: ${hours}`
+            : "нет данных";
+
+        } catch (e) {
+          console.error("Hours load error:", e);
+        }
+      })
+    );
+
+    // 🔥 защита от бана Steam
+    await new Promise(r => setTimeout(r, 800));
+  }
+}
+
+// =====================
 // Admin (token + CRUD)
 // =====================
 const ADMIN_TOKEN_KEY = "st_admin_token";
@@ -861,35 +958,52 @@ function makeIconBtn(href, iconSrc, alt) {
 function createStreamerCard(s, data) {
   const el = document.createElement("div");
   el.className = "streamer";
+
+  // сохраняем данные прямо в карточке (важно для часов)
   el._steamUrl = s.steamUrl;
   el._id = s.id;
 
+  // =====================
+  // ADMIN BUTTONS
+  // =====================
   const adminActions = document.createElement("div");
   adminActions.className = "admin-card-actions";
   adminActions.style.display = adminEnabled ? "flex" : "none";
   adminActions.innerHTML = `
-    <button class="admin-mini" type="button" title="Редактировать" aria-label="Редактировать">✏</button>
-    <button class="admin-mini" type="button" title="Удалить" aria-label="Удалить">🗑</button>
+    <button class="admin-mini" type="button">✏</button>
+    <button class="admin-mini" type="button">🗑</button>
   `;
+
   const btns = adminActions.querySelectorAll("button");
+
   btns[0].onclick = () => openStreamerModal("edit", s);
+
   btns[1].onclick = async () => {
     try {
       if (!adminEnabled) return;
       if (!s.id) return showPopup("❌ Нет id");
       if (!confirm(`Удалить "${s.realName}"?`)) return;
-      await adminApi(`/streamers?id=${encodeURIComponent(s.id)}`, { method: "DELETE" });
+
+      await adminApi(`/streamers?id=${encodeURIComponent(s.id)}`, {
+        method: "DELETE"
+      });
+
       showPopup("✅ Удалено");
       await loadStreamersList();
       await updateAllStreamers(true);
       applyAdminToExistingCards();
+
     } catch (e) {
       console.error(e);
       showPopup("❌ Ошибка удаления");
     }
   };
+
   el.appendChild(adminActions);
 
+  // =====================
+  // AVATAR
+  // =====================
   const avatarWrapper = document.createElement("div");
   avatarWrapper.className = "avatar-wrapper";
   avatarWrapper.style.position = "relative";
@@ -907,30 +1021,41 @@ function createStreamerCard(s, data) {
     indicator.style.cssText =
       "position:absolute;top:4px;right:4px;width:12px;height:12px;border-radius:50%;" +
       "box-shadow:0 0 4px rgba(0,0,0,0.5);background:" + initialColor;
+
     avatarWrapper.appendChild(indicator);
     el._indicatorEl = indicator;
   }
 
   el.appendChild(avatarWrapper);
 
+  // =====================
+  // INFO (🔥 фикс тут)
+  // =====================
   const infoWrapper = document.createElement("div");
   infoWrapper.className = "streamer-info";
+
   infoWrapper.innerHTML = `
     <div class="streamer-name">${s.realName}</div>
+
     <div class="streamer-steam">
       <span class="steam-label">Имя в стим:</span>
       <span class="steam-nick">${data.nick || "Загрузка..."}</span>
     </div>
+
     <div class="streamer-id">
       <span class="steam-label">Steam ID:</span>
       <span class="steam-id clickable">${data.steamId || "Загрузка..."}</span>
+    </div>
+
+    <div class="streamer-hours" id="hours-${s.id}">
+      ⏳ Часы в Rust: загрузка...
     </div>
   `;
 
   el._steamNickEl = infoWrapper.querySelector(".steam-nick");
   el._steamIdEl = infoWrapper.querySelector(".steam-id");
 
-  el._steamIdEl?.addEventListener?.("click", async () => {
+  el._steamIdEl?.addEventListener("click", async () => {
     const text = el._steamIdEl?.textContent || "";
     try {
       await navigator.clipboard.writeText(text);
@@ -942,6 +1067,9 @@ function createStreamerCard(s, data) {
 
   el.appendChild(infoWrapper);
 
+  // =====================
+  // BUTTONS
+  // =====================
   const buttonsWrapper = document.createElement("div");
   buttonsWrapper.className = "streamer-buttons";
 
@@ -951,6 +1079,7 @@ function createStreamerCard(s, data) {
   steamBtn.rel = "noopener noreferrer";
   steamBtn.className = "primary-btn";
   steamBtn.innerHTML = `<img src="${ICONS.steam}" alt="steam"/>Открыть профиль`;
+
   buttonsWrapper.appendChild(steamBtn);
 
   const iconGroup = document.createElement("div");
@@ -966,10 +1095,10 @@ function createStreamerCard(s, data) {
     iconGroup.appendChild(bm);
   }
 
-  if (s.twitch) iconGroup.appendChild(makeIconBtn(s.twitch, ICONS.twitch, "twitch"));
-  if (s.youtube) iconGroup.appendChild(makeIconBtn(s.youtube, ICONS.youtube, "youtube"));
-  if (s.kick) iconGroup.appendChild(makeIconBtn(s.kick, ICONS.kick, "kick"));
-  if (s.tiktok) iconGroup.appendChild(makeIconBtn(s.tiktok, ICONS.tiktok, "tiktok"));
+  if (s.twitch) iconGroup.appendChild(makeIconBtn(s.twitch, ICONS.twitch));
+  if (s.youtube) iconGroup.appendChild(makeIconBtn(s.youtube, ICONS.youtube));
+  if (s.kick) iconGroup.appendChild(makeIconBtn(s.kick, ICONS.kick));
+  if (s.tiktok) iconGroup.appendChild(makeIconBtn(s.tiktok, ICONS.tiktok));
 
   buttonsWrapper.appendChild(iconGroup);
   el.appendChild(buttonsWrapper);
@@ -977,9 +1106,12 @@ function createStreamerCard(s, data) {
   return el;
 }
 
-// status: 0=online, 1=offline, 2=unknown (TikTok-only / не учитываем)
+// =====================
+// Indicator
+// =====================
 function setIndicator(card, status) {
   if (!card._indicatorEl) return;
+
   card._indicatorEl.style.background =
     status === 0 ? GREEN :
     status === 2 ? GRAY :
@@ -1016,7 +1148,40 @@ function startCountdown() {
 // =====================
 async function updateAllStreamers(forceRefresh = false) {
   const total = streamers.length;
+
   setLoading(true, `Подтягиваем данные Steam… 0/${total}`);
+
+  const container = document.getElementById("streamers-container");
+  container.innerHTML = "";
+
+  const cardsArray = [];
+
+  // =====================
+  // Создание карточек
+  // =====================
+  for (let i = 0; i < streamers.length; i++) {
+    const s = streamers[i];
+
+    const data = await fetchSteamData(s, forceRefresh);
+
+    const card = createStreamerCard(s, data);
+
+    // 🔥 ОБЯЗАТЕЛЬНО
+    card._steamUrl = s.steamUrl;
+
+    cardsArray.push(card);
+    container.appendChild(card);
+
+    setLoading(true, `Подтягиваем данные Steam… ${i + 1}/${total}`);
+  }
+
+  // =====================
+  // 🔥 Загрузка часов (ПОСЛЕ рендера)
+  // =====================
+  await loadRustHoursForAll(streamers, cardsArray);
+
+  setLoading(false);
+}
 
   const cards = [];
   if (!forceRefresh && container && container.children.length > 0) {
